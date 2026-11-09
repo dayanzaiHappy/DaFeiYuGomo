@@ -1,0 +1,24 @@
+{
+  "name": "dafeiyugomo",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "五子棋网页版 · DaFeiYuGomo",
+  "scripts": {
+    "copy:ort": "node scripts/copy-ort.mjs",
+    "predev": "npm run copy:ort",
+    "dev": "vite",
+    "prebuild": "npm run copy:ort",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.22.0"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vite": "8.3.7",
+    "vitest": "5.1.0"
+  }
+}

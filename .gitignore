@@ -1,0 +1,17 @@
+node_modules/
+dist/
+public/ort/
+.DS_Store
+*.local
+
+# 本地生成 / 临时产物
+.screenshots/
+e2e-*.png
+.trae-html-share-packages/
+docs/local/
+
+# 本地单元测试：保留在本机，不随仓库发布
+tests/
+
+# 原始素材：仅本地保留；网页使用 public/images/ 下缩放后的版本
+assets/
