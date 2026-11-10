@@ -28,7 +28,12 @@ import {
 } from './game/board';
 import { buildHintView } from './game/explain';
 import { chooseOpeningResponse } from './game/opening';
-import { WHALE_LINES } from './content/whale-lines';
+import {
+  pickLine,
+  pickLineStable,
+  resetLines,
+  WHALE_LINES,
+} from './content/whale-lines';
 import { HintCache } from './game/hint-cache';
 import { mascotSvg, type MascotState } from './ui/mascot';
 import type { Player, SearchResult } from './game/types';
@@ -110,6 +115,19 @@ let currentMascot: MascotState = 'idle';
 let cacheHits = 0;
 let lastSearch = { kind: '-', sims: 0, ms: 0 };
 
+/* 台词相关的一次性状态，不持久化 */
+/** 本局开局是否要抗议「大肥鱼」这个外号 */
+let nameGagArmed = false;
+/** 玩家在人机模式下的连胜数，到 3 触发摆烂台词 */
+let winStreak = 0;
+/** 本局是否已经触发过摆烂台词，开局时重置 */
+let tiltNow = false;
+/** 本局悔棋次数，到 3 触发「用户你够了」 */
+let undoCount = 0;
+/** 提示开始计算的时刻，用于「已思考 N 秒」 */
+let hintStartedAt = 0;
+let thinkingTick = 0;
+
 function createGameState(mode: Mode, humanColor: Player): GameState {
   return {
     mode,
@@ -136,6 +154,7 @@ const boardView = new BoardView(
     onPlace: (move) => {
       if (!canHumanPlace()) {
         audio.play('invalid');
+        showToast(pickLine(WHALE_LINES.notYourTurn), 1600);
         return;
       }
       place(move);
@@ -199,7 +218,7 @@ function setHintChips(chips: Array<{ label: string }>): void {
   }
 }
 
-function showToast(message: string, duration = 2800): void {
+function showToast(message: string, duration = 1800): void {
   window.clearTimeout(toastTimer);
   toastEl.textContent = message;
   toastEl.classList.remove('hidden');
@@ -297,6 +316,26 @@ function refreshStatus(): void {
   }
 }
 
+/** 提示计算期间每秒刷新一次「已思考 N 秒」。 */
+function startThinkingTick(): void {
+  stopThinkingTick();
+  thinkingTick = window.setInterval(() => refreshHintPanel(), 1000);
+}
+
+function stopThinkingTick(): void {
+  if (!thinkingTick) return;
+  window.clearInterval(thinkingTick);
+  thinkingTick = 0;
+}
+
+/**
+ * 气泡文案。
+ *
+ * 两条硬约束：
+ * 1. 走 `pickLineStable`，签名 = 槽位 + 手数。这样重绘（切皮肤、开关音效）不会换词，
+ *    只有局面真的变了才换。
+ * 2. 台词都很短，气泡高度靠 CSS 的 min-height 兜住，这里不做长度处理。
+ */
 function refreshHintPanel(): void {
   if (state.hint) {
     const view = buildHintView(state.board, state.current, state.hint);
@@ -308,31 +347,43 @@ function refreshHintPanel(): void {
   }
 
   if (state.hintLoading) {
-    hintText.textContent = WHALE_LINES.thinking;
     setHintChips([]);
+    const elapsed = hintStartedAt ? Math.floor((Date.now() - hintStartedAt) / 1000) : 0;
+    // 超过 5 秒换成 DeepSeek 的经典计时文案
+    hintText.textContent =
+      elapsed >= 5
+        ? `已思考 ${elapsed} 秒...`
+        : pickLineStable('bubble', WHALE_LINES.thinking, `thinking:${state.history.length}`);
     return;
   }
 
   setHintChips([]);
 
+  const sig = (key: string) => `${key}:${state.history.length}`;
+  const say = (key: string, pool: readonly string[]) => {
+    hintText.textContent = pickLineStable('bubble', pool, sig(key));
+  };
+
   if (state.status === 'won') {
-    hintText.textContent =
-      state.mode === 'pvai' && state.winner !== state.humanColor
-        ? WHALE_LINES.lose
-        : WHALE_LINES.win;
-  } else if (state.status === 'draw') {
-    hintText.textContent = WHALE_LINES.draw;
-  } else if (state.mode === 'pvp') {
-    hintText.textContent = WHALE_LINES.pvp;
-  } else if (aiStatus === 'loading') {
-    hintText.textContent = WHALE_LINES.loading;
-  } else if (aiStatus === 'error') {
-    hintText.textContent = WHALE_LINES.loadError;
-  } else if (state.thinking) {
-    hintText.textContent = WHALE_LINES.myTurn;
-  } else {
-    hintText.textContent = WHALE_LINES.idle;
+    if (state.mode === 'pvp') return say('pvpEnd', WHALE_LINES.pvpEnd);
+    if (state.winner === state.humanColor) {
+      // 连胜三局后她说一次摆烂台词（tiltNow 由 place() 置位）
+      return tiltNow ? say('tilt', WHALE_LINES.tilt) : say('youWin', WHALE_LINES.youWin);
+    }
+    return say('fishWin', WHALE_LINES.fishWin);
   }
+  if (state.status === 'draw') return say('draw', WHALE_LINES.draw);
+  if (aiStatus === 'error') return say('loadError', WHALE_LINES.loadError);
+  if (state.mode === 'pvp') return say('pvp', WHALE_LINES.pvp);
+  if (state.history.length === 0) {
+    return say(
+      nameGagArmed ? 'nameGag' : 'opening',
+      nameGagArmed ? WHALE_LINES.nameGag : WHALE_LINES.opening,
+    );
+  }
+  if (aiStatus === 'loading') return say('loading', WHALE_LINES.loading);
+  if (state.thinking) return say('myTurn', WHALE_LINES.myTurn);
+  return say('idle', WHALE_LINES.idle);
 }
 
 function refreshControls(): void {
@@ -574,7 +625,7 @@ async function botMove(): Promise<void> {
 async function requestHint(): Promise<void> {
   if (state.mode !== 'pvai' || state.status !== 'playing') return;
   if (state.current !== state.humanColor) {
-    showToast('轮到你的时候才能提示');
+    showToast(pickLine(WHALE_LINES.notYourTurn), 1600);
     return;
   }
 
@@ -604,6 +655,8 @@ async function requestHint(): Promise<void> {
   state.hintLoading = true;
   state.hint = null;
   setMascot('thinking');
+  hintStartedAt = Date.now();
+  startThinkingTick();
   refreshAll();
 
   const started = performance.now();
@@ -641,6 +694,7 @@ async function requestHint(): Promise<void> {
   } finally {
     if (token === hintToken) {
       state.hintLoading = false;
+      stopThinkingTick();
       refreshAll();
     }
   }
@@ -649,6 +703,7 @@ async function requestHint(): Promise<void> {
 function cancelHint(): void {
   hintToken++;
   aiClient?.cancelAll();
+  stopThinkingTick();
   state.hintLoading = false;
   state.hint = null;
   setMascot('idle');
@@ -658,6 +713,7 @@ function cancelHint(): void {
 function clearHint(): void {
   hintToken++;
   aiClient?.cancelAll();
+  stopThinkingTick();
   state.hint = null;
   state.hintLoading = false;
   refreshAll();
@@ -669,10 +725,12 @@ function place(move: number, byAi = false): void {
   if (state.status !== 'playing') return;
   if (!byAi && !canHumanPlace()) {
     audio.play('invalid');
+    showToast(pickLine(WHALE_LINES.notYourTurn), 1600);
     return;
   }
   if (!isValidMove(state.board, move)) {
     audio.play('invalid');
+    showToast(pickLine(WHALE_LINES.illegal), 1400);
     return;
   }
 
@@ -682,6 +740,7 @@ function place(move: number, byAi = false): void {
   state.lastMove = move;
   state.hint = null;
   state.hintLoading = false;
+  stopThinkingTick();
   hintToken++;
   if (!byAi) aiClient?.cancelAll();
 
@@ -693,11 +752,23 @@ function place(move: number, byAi = false): void {
     audio.play(
       state.mode === 'pvai' && win !== state.humanColor ? 'lose' : 'win',
     );
+    if (state.mode === 'pvai') {
+      if (win === state.humanColor) {
+        winStreak += 1;
+        if (winStreak >= 3) {
+          winStreak = 0;
+          tiltNow = true;
+        }
+      } else {
+        winStreak = 0;
+      }
+    }
     scheduleResult();
   } else if (isBoardFull(state.board)) {
     state.status = 'draw';
     state.winner = null;
     state.winLine = [];
+    winStreak = 0;
     audio.play('draw');
     scheduleResult();
   } else {
@@ -725,20 +796,24 @@ function scheduleResult(): void {
   }, 380);
 }
 
+/**
+ * 结算弹窗只报结果，不带性格。
+ * 台词留给气泡——同一个瞬间说两遍反而啰嗦，按钮本身也已经问了「再来一局」。
+ */
 function showResultModal(): void {
   let title = '平局';
-  let subtitle = '棋盘满了，再来一局分个胜负？';
+  let subtitle = '棋盘满了。';
 
   if (state.status === 'won') {
     if (state.mode === 'pvp') {
-      title = state.winner === BLACK ? '黑方胜！' : '白方胜！';
-      subtitle = '这一局下得不错。';
+      title = state.winner === BLACK ? '黑方胜' : '白方胜';
+      subtitle = '这局结束了。';
     } else if (state.winner === state.humanColor) {
-      title = '你赢了！';
-      subtitle = '大肥鱼认输，再来一局？';
+      title = '你赢了';
+      subtitle = '五连已成。';
     } else {
-      title = '大肥鱼赢了';
-      subtitle = '这局被它算到了，再来一局？';
+      title = '小鲸鱼赢了';
+      subtitle = '五连已成。';
     }
   }
 
@@ -769,12 +844,14 @@ function undo(): void {
   gameToken++;
   hintToken++;
   aiClient?.cancelAll();
+  stopThinkingTick();
   state.thinking = false;
   state.hint = null;
   state.hintLoading = false;
   state.status = 'playing';
   state.winner = null;
   state.winLine = [];
+  tiltNow = false;
   window.clearTimeout(resultTimer);
 
   const steps = state.mode === 'pvai' ? Math.min(2, state.history.length) : 1;
@@ -796,12 +873,19 @@ function undo(): void {
     }
   }
 
+  undoCount += 1;
   refreshAll();
   audio.play('ui');
+  showToast(
+    pickLine(undoCount >= 3 ? WHALE_LINES.undoRepeat : WHALE_LINES.undo),
+    1600,
+  );
 }
 
 function restartGame(): void {
   startGame(state.mode, state.humanColor);
+  // 只有"确实在重开"时才说这句，从主菜单第一次进对局不说
+  showToast(pickLine(WHALE_LINES.restart), 1600);
 }
 
 function startGame(mode: Mode, humanColor: Player): void {
@@ -809,6 +893,12 @@ function startGame(mode: Mode, humanColor: Player): void {
   gameToken++;
   hintToken++;
   aiClient?.cancelAll();
+  resetLines();
+  stopThinkingTick();
+  undoCount = 0;
+  tiltNow = false;
+  // 每 8 局有 1 局开局抗议「大肥鱼」这个外号
+  nameGagArmed = Math.random() < 0.125;
   state = createGameState(mode, humanColor);
   showScreen('game');
   applySkin();
@@ -817,7 +907,7 @@ function startGame(mode: Mode, humanColor: Player): void {
 
   if (mode === 'pvai') {
     void ensureAi().catch(() => {
-      showToast('AI 引擎加载失败，请检查网络后重试');
+      showToast(pickLine(WHALE_LINES.loadError), 2200);
     });
     if (humanColor === WHITE) {
       place(7 * 15 + 7, true);
@@ -830,6 +920,7 @@ function goHome(): void {
   gameToken++;
   hintToken++;
   aiClient?.cancelAll();
+  stopThinkingTick();
   state.thinking = false;
   state.hintLoading = false;
   showScreen('home');

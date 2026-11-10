@@ -6,7 +6,7 @@ import {
   rowOf,
   shortCoord,
 } from './board';
-import { fillLine, WHALE_LINES } from '../content/whale-lines';
+import { fillLine, pickLine, WHALE_LINES } from '../content/whale-lines';
 import {
   BLACK,
   DIRECTIONS,
@@ -98,7 +98,7 @@ export function analyzeMove(board: BoardState, player: Player, move: number): Mo
   return result;
 }
 
-function reasonFor(analysis: MoveAnalysis): string {
+function reasonFor(analysis: MoveAnalysis): readonly string[] {
   if (analysis.wouldWin) return WHALE_LINES.reasons.win;
   if (analysis.blocksWin) return WHALE_LINES.reasons.blockWin;
   if (analysis.createsOpenFour) return WHALE_LINES.reasons.openFour;
@@ -110,7 +110,13 @@ function reasonFor(analysis: MoveAnalysis): string {
   return WHALE_LINES.reasons.fallback;
 }
 
-function confidenceFor(value: number): string {
+/**
+ * 收尾措辞。
+ * 必杀局面（一手成五 / 必须挡五）直接给 certain：这时说「局面有点紧」是自相矛盾，
+ * 而 value 只是搜索 Q 值，不保证落在高分区。
+ */
+function confidenceFor(analysis: MoveAnalysis, value: number): string {
+  if (analysis.wouldWin || analysis.blocksWin) return WHALE_LINES.confidence.certain;
   if (value >= 0.72) return WHALE_LINES.confidence.high;
   if (value >= 0.55) return WHALE_LINES.confidence.medium;
   return WHALE_LINES.confidence.low;
@@ -123,18 +129,28 @@ export interface HintView {
   chips: Array<{ rank: number; move: number; label: string }>;
 }
 
+/**
+ * 同一次提示只生成一遍文案。
+ * `refreshHintPanel()` 每次 `refreshAll()` 都会调到这里，若不缓存，
+ * 切皮肤或开关音效时提示语会自己换一句。
+ */
+const viewCache = new WeakMap<SearchResult, HintView>();
+
 export function buildHintView(
   board: BoardState,
   player: Player,
   result: SearchResult,
 ): HintView | null {
   if (result.move < 0) return null;
+  const cached = viewCache.get(result);
+  if (cached) return cached;
+
   const analysis = analyzeMove(board, player, result.move);
   const coord = formatCoord(result.move);
-  const text = fillLine(WHALE_LINES.suggestion, {
+  const text = fillLine(pickLine(WHALE_LINES.suggestion), {
     coord,
-    reason: reasonFor(analysis),
-    confidence: confidenceFor(result.value),
+    reason: pickLine(reasonFor(analysis)),
+    confidence: confidenceFor(analysis, result.value),
   });
 
   // value 是 MCTS 回传的搜索评分（Q 值），不是校准后的真实胜率，因此按“分”展示。
@@ -147,5 +163,7 @@ export function buildHintView(
       label: `${index + 1} ${shortCoord(item.move)} · ${Math.round(item.value * 100)} 分`,
     }));
 
-  return { text, move: result.move, coord, chips };
+  const view: HintView = { text, move: result.move, coord, chips };
+  viewCache.set(result, view);
+  return view;
 }

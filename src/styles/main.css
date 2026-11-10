@@ -623,6 +623,8 @@ button {
   line-height: 1.68;
   color: #e7f1ff;
   overflow-wrap: anywhere;
+  /* 台词普遍只有 4~12 字，锁两行高度，避免切换状态时右侧栏跟着跳 */
+  min-height: 3.4em;
 }
 
 .hint-chips {
