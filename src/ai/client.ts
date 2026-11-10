@@ -30,6 +30,7 @@ export interface SearchRequest {
   temperature?: number;
   sampleTopK?: number;
   rootNoise?: RootNoise | null;
+  lastMove?: number;
   onProgress?: (progress: SearchProgress) => void;
 }
 
@@ -159,6 +160,7 @@ export class AiClient {
           temperature: request.temperature,
           sampleTopK: request.sampleTopK,
           rootNoise: request.rootNoise,
+          lastMove: request.lastMove,
         },
         [copy.buffer],
       );

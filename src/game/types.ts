@@ -26,6 +26,12 @@ export interface SearchTop {
 export interface RootNoise {
   epsilon: number;
   alpha: number;
+  /** 支持集的质量护栏：只让先验 ≥ minRatio × max(prior) 的点参与加噪；缺省表示不过滤。 */
+  minRatio?: number;
+  /** 支持集的切比雪夫半径（相对上一手）；缺省表示不过滤。 */
+  radius?: number;
+  /** 支持集的数量上限；缺省表示不限（即 Ver 1.0 的全部子节点）。 */
+  topM?: number;
 }
 
 export interface SearchResult {

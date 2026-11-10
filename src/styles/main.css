@@ -766,6 +766,28 @@ button {
   font-weight: 600;
 }
 
+/* 四档难度：窄屏把开关组整体下移，避免把说明文字挤成一条细柱。 */
+@media (max-width: 460px) {
+  .field-difficulty {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .field-difficulty .difficulty-group {
+    display: flex;
+    width: 100%;
+    flex: 1 1 auto;
+  }
+
+  .field-difficulty .difficulty-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 7px 4px;
+    text-align: center;
+  }
+}
+
 .switch {
   position: relative;
   width: 48px;

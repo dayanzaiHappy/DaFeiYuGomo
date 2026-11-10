@@ -1,4 +1,4 @@
-import { legalMoves, checkWin, isBoardFull } from './board';
+import { legalMoves, checkWin, isBoardFull, colOf, rowOf } from './board';
 import {
   BLACK,
   type BoardState,
@@ -56,6 +56,8 @@ export interface SearchOptions {
   sampleTopK?: number;
   /** 根节点 Dirichlet 噪声；null 表示不加。 */
   rootNoise?: RootNoise | null;
+  /** 棋盘上最后一手的位置，用于噪声支持集的位置过滤；-1 表示不做位置过滤。 */
+  lastMove?: number;
 }
 
 function uctValue(child: Node, parentVisits: number, cPuct: number): number {
@@ -155,26 +157,127 @@ function sampleDirichlet(size: number, alpha: number, random: () => number): num
   return values;
 }
 
-/** 对根节点的子节点先验加 Dirichlet 噪声并重新归一化。 */
+/** 两个棋盘点之间的切比雪夫距离。 */
+function chebyshev(a: number, b: number): number {
+  return Math.max(Math.abs(rowOf(a) - rowOf(b)), Math.abs(colOf(a) - colOf(b)));
+}
+
+/**
+ * 对根节点先验加 Dirichlet 噪声（纯函数，便于单测）。
+ *
+ * 支持集 S 由三道过滤取交集得到：
+ *   1. 质量护栏：prior ≥ minRatio × max(prior)
+ *   2. 位置护栏：chebyshev(move, lastMove) ≤ radius（lastMove < 0 时跳过）
+ *   3. 数量上限：按 (prior 降序, move 升序) 取前 topM 名
+ *
+ * 混合：
+ *   p'_i = (1-ε)·p_i + ε·η_i   i ∈ S
+ *   p'_i = (1-ε)·p_i           i ∉ S
+ *
+ * 总和恒为 1；ε=1 时支持集外先验精确清零。
+ * |S| ≤ 1 时直接返回：单点 Dirichlet 恒为 1，只会把该点抬高，等于强化自信而非随机化。
+ */
+export function mixRootNoise(
+  entries: ReadonlyArray<{ prior: number; move: number }>,
+  noise: RootNoise,
+  random: () => number = Math.random,
+  lastMove = -1,
+): number[] {
+  const count = entries.length;
+  const out = new Array<number>(count);
+  for (let i = 0; i < count; i++) out[i] = entries[i].prior;
+  if (count <= 1) return out;
+
+  const epsilon = Number.isFinite(noise.epsilon) ? Math.min(1, Math.max(0, noise.epsilon)) : 0;
+  if (!(epsilon > 0) || !(noise.alpha > 0) || !Number.isFinite(noise.alpha)) return out;
+
+  // 清洗并归一化先验，避免 NaN / 负值污染 Dirichlet。
+  let sum = 0;
+  for (let i = 0; i < count; i++) {
+    const value = out[i];
+    const safe = Number.isFinite(value) && value > 0 ? value : 0;
+    out[i] = safe;
+    sum += safe;
+  }
+  if (!(sum > 0)) return new Array<number>(count).fill(1 / count);
+  if (Math.abs(sum - 1) > 1e-9) {
+    for (let i = 0; i < count; i++) out[i] /= sum;
+  }
+
+  // 质量护栏
+  let maxPrior = 0;
+  for (let i = 0; i < count; i++) if (out[i] > maxPrior) maxPrior = out[i];
+  const ratioRaw = noise.minRatio;
+  const ratio =
+    typeof ratioRaw === 'number' && Number.isFinite(ratioRaw) && ratioRaw > 0
+      ? Math.min(1, ratioRaw)
+      : 0;
+  const floor = ratio * maxPrior;
+
+  // 位置护栏
+  const radiusRaw = noise.radius;
+  const radius =
+    typeof radiusRaw === 'number' && Number.isFinite(radiusRaw) && radiusRaw >= 0
+      ? radiusRaw
+      : -1;
+  const hasRadius = radius >= 0 && lastMove >= 0;
+
+  // 数量上限
+  const rawLimit = noise.topM;
+  const limit =
+    typeof rawLimit === 'number' && Number.isFinite(rawLimit) && rawLimit > 0
+      ? Math.min(count, Math.max(1, Math.floor(rawLimit)))
+      : count;
+
+  const support: number[] = [];
+  for (let i = 0; i < count; i++) {
+    if (out[i] < floor) continue;
+    if (hasRadius && chebyshev(entries[i].move, lastMove) > radius) continue;
+    support.push(i);
+  }
+  support.sort((a, b) => {
+    if (out[a] !== out[b]) return out[b] - out[a];
+    return entries[a].move - entries[b].move;
+  });
+
+  const size = Math.min(limit, support.length);
+  if (size <= 1) return out;
+
+  const eta = sampleDirichlet(size, noise.alpha, random);
+  const keep = 1 - epsilon;
+  for (let i = 0; i < count; i++) out[i] *= keep;
+  for (let k = 0; k < size; k++) out[support[k]] += epsilon * eta[k];
+
+  let total = 0;
+  for (let i = 0; i < count; i++) total += out[i];
+  if (!(total > 0) || !Number.isFinite(total)) {
+    return new Array<number>(count).fill(1 / count);
+  }
+  if (Math.abs(total - 1) > 1e-9) {
+    for (let i = 0; i < count; i++) out[i] /= total;
+  }
+  return out;
+}
+
+/** 把 mixRootNoise 的结果写回根节点的子节点先验。 */
 function applyRootNoise(
   root: Node,
   nodes: Node[],
   noise: RootNoise,
   random: () => number,
+  lastMove: number,
 ): void {
-  const epsilon = Math.min(1, Math.max(0, noise.epsilon));
-  if (epsilon <= 0 || !(noise.alpha > 0) || root.children.length <= 1) return;
+  const count = root.children.length;
+  if (count <= 1) return;
 
-  const eta = sampleDirichlet(root.children.length, noise.alpha, random);
-  let sum = 0;
-  for (let i = 0; i < root.children.length; i++) {
+  const entries: Array<{ prior: number; move: number }> = new Array(count);
+  for (let i = 0; i < count; i++) {
     const child = nodes[root.children[i]];
-    child.prior = (1 - epsilon) * child.prior + epsilon * eta[i];
-    sum += child.prior;
+    entries[i] = { prior: child.prior, move: child.move };
   }
-  if (sum > 0 && Number.isFinite(sum)) {
-    for (const childIndex of root.children) nodes[childIndex].prior /= sum;
-  }
+
+  const mixed = mixRootNoise(entries, noise, random, lastMove);
+  for (let i = 0; i < count; i++) nodes[root.children[i]].prior = mixed[i];
 }
 
 /**
@@ -282,7 +385,7 @@ export async function runSearch(
   const rootEval = await evaluator.evaluate(root.grid, root.player);
   expand(0, rootEval, rootLegal);
   if (options.rootNoise) {
-    applyRootNoise(root, nodes, options.rootNoise, random);
+    applyRootNoise(root, nodes, options.rootNoise, random, options.lastMove ?? -1);
   }
 
   const select = (): { leaf: number; path: number[] } => {

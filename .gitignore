@@ -15,3 +15,6 @@ tests/
 
 # 原始素材：仅本地保留；网页使用 public/images/ 下缩放后的版本
 assets/
+
+# 本地会话记忆与计划：仅本机保留
+.workbuddy/

@@ -26,6 +26,7 @@ type SearchMessage = {
   temperature?: number;
   sampleTopK?: number;
   rootNoise?: RootNoise | null;
+  lastMove?: number;
 };
 
 type CancelMessage = {
@@ -254,6 +255,7 @@ async function startSearch(message: SearchMessage): Promise<void> {
       temperature: message.temperature,
       sampleTopK: message.sampleTopK,
       rootNoise: message.rootNoise,
+      lastMove: message.lastMove,
       progressEvery: AI_CONFIG.progressEvery,
       onProgress: (progress) => {
         if (!token.cancelled) {

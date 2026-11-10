@@ -7,7 +7,10 @@ import { BoardView, type BoardViewState } from './render/board-view';
 import { getSkin, SKIN_LIST, type Skin } from './render/skins';
 import {
   AI_CONFIG,
+  DIFFICULTY_LABELS,
+  DIFFICULTY_ORDER,
   DIFFICULTY_SIMS,
+  isAiDifficulty,
   OPPONENT_NOISE,
   OPPONENT_TEMPERATURE,
   SAMPLE_TOP_K,
@@ -41,11 +44,9 @@ type Mode = 'pvp' | 'pvai';
 type GameStatus = 'playing' | 'won' | 'draw';
 type AiState = 'idle' | 'loading' | 'ready' | 'error';
 
-const DIFFICULTY_OPTIONS: Array<{ id: AiDifficulty; label: string }> = [
-  { id: 'easy', label: '简单' },
-  { id: 'normal', label: '普通' },
-  { id: 'hard', label: '困难' },
-];
+const DIFFICULTY_OPTIONS: Array<{ id: AiDifficulty; label: string }> = DIFFICULTY_ORDER.map(
+  (id) => ({ id, label: DIFFICULTY_LABELS[id] }),
+);
 
 interface GameState {
   mode: Mode;
@@ -538,6 +539,7 @@ async function botMove(): Promise<void> {
       temperature: OPPONENT_TEMPERATURE[settings.difficulty],
       sampleTopK: SAMPLE_TOP_K,
       rootNoise: OPPONENT_NOISE[settings.difficulty],
+      lastMove: state.lastMove ?? -1,
     });
     lastSearch = {
       kind: '对手',
@@ -916,10 +918,10 @@ function openSettings(): void {
         <input id="set-volume" type="range" min="0" max="100" value="${Math.round(settings.volume * 100)}" />
       </div>
 
-      <div class="field">
+      <div class="field field-difficulty">
         <div class="field-label">
           <strong>AI 难度</strong>
-          <small>简单 / 普通 / 困难，影响大肥鱼落子强度。</small>
+          <small>四档难度：简单 / 普通 / 困难 / 地狱，逐级加大搜索预算。</small>
         </div>
         <div class="difficulty-group" role="group" aria-label="AI 难度">
           ${difficultyButtons}
@@ -986,8 +988,8 @@ function openSettings(): void {
 
   modalRoot.querySelectorAll<HTMLButtonElement>('[data-difficulty]').forEach((button) => {
     button.addEventListener('click', () => {
-      const level = button.dataset.difficulty as AiDifficulty | undefined;
-      if (!level) return;
+      const level = button.dataset.difficulty;
+      if (!isAiDifficulty(level)) return;
       settings.difficulty = level;
       saveSettings(settings);
       modalRoot.querySelectorAll('.difficulty-btn').forEach((item) => {
