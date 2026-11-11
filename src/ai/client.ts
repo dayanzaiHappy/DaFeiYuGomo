@@ -31,6 +31,9 @@ export interface SearchRequest {
   sampleTopK?: number;
   rootNoise?: RootNoise | null;
   lastMove?: number;
+  rootLimit?: number;
+  forcedPlies?: number;
+  vcfDepth?: number;
   onProgress?: (progress: SearchProgress) => void;
 }
 
@@ -161,6 +164,9 @@ export class AiClient {
           sampleTopK: request.sampleTopK,
           rootNoise: request.rootNoise,
           lastMove: request.lastMove,
+          rootLimit: request.rootLimit,
+          forcedPlies: request.forcedPlies,
+          vcfDepth: request.vcfDepth,
         },
         [copy.buffer],
       );

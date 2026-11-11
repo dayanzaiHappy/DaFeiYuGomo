@@ -99,46 +99,84 @@ export function isBoardFull(board: BoardState): boolean {
   return true;
 }
 
-const NEIGHBORS_CACHE = new Map<number, Array<[number, number]>>();
-
-function neighbors(radius: number): Array<[number, number]> {
-  const cached = NEIGHBORS_CACHE.get(radius);
-  if (cached) return cached;
-  const out: Array<[number, number]> = [];
-  for (let dr = -radius; dr <= radius; dr++) {
-    for (let dc = -radius; dc <= radius; dc++) {
-      if (dr === 0 && dc === 0) continue;
-      out.push([dr, dc]);
-    }
-  }
-  NEIGHBORS_CACHE.set(radius, out);
-  return out;
+interface NeighborTable {
+  /** 长度 N_CELLS × stride，越界存 -1。 */
+  table: Int16Array;
+  stride: number;
 }
 
-export function legalMoves(board: BoardState, radius = 4): number[] {
-  let empty = true;
-  for (let i = 0; i < N_CELLS; i++) {
-    if (board[i] !== EMPTY) {
-      empty = false;
-      break;
+const NEIGHBOR_TABLES = new Map<number, NeighborTable>();
+
+/**
+ * 每个格子 × 每个偏移 → 邻居索引。
+ * 预计算换掉内层的 inBounds + rowOf + colOf，是候选生成提速的主要来源。
+ */
+function neighborTable(radius: number): NeighborTable {
+  const cached = NEIGHBOR_TABLES.get(radius);
+  if (cached) return cached;
+
+  const offsets: Array<[number, number]> = [];
+  for (let dr = -radius; dr <= radius; dr++) {
+    for (let dc = -radius; dc <= radius; dc++) {
+      if (dr !== 0 || dc !== 0) offsets.push([dr, dc]);
     }
   }
-  if (empty) return [idx(7, 7)];
 
-  const out: number[] = [];
-  const offsets = neighbors(radius);
+  const stride = offsets.length;
+  const table = new Int16Array(N_CELLS * stride);
   for (let move = 0; move < N_CELLS; move++) {
-    if (board[move] !== EMPTY) continue;
     const row = rowOf(move);
     const col = colOf(move);
-    for (const [dr, dc] of offsets) {
-      const r = row + dr;
-      const c = col + dc;
-      if (!inBounds(r, c)) continue;
-      if (board[idx(r, c)] !== EMPTY) {
-        out.push(move);
-        break;
-      }
+    const base = move * stride;
+    for (let i = 0; i < stride; i++) {
+      const r = row + offsets[i][0];
+      const c = col + offsets[i][1];
+      table[base + i] = inBounds(r, c) ? idx(r, c) : -1;
+    }
+  }
+
+  const built: NeighborTable = { table, stride };
+  NEIGHBOR_TABLES.set(radius, built);
+  return built;
+}
+
+const LEGAL_WORDS = Math.ceil(N_CELLS / 32);
+/** 按位去重用的临时位图；legalMoves 是同步且不重入的，复用一份即可。 */
+const legalBits = new Uint32Array(LEGAL_WORDS);
+
+/**
+ * 半径内的空点候选，按索引升序。
+ *
+ * 只遍历落子点、把它们的邻居标进位图，再按位图升序还原——
+ * 结果与「遍历全部空点、逐个检查 80 个偏移」逐点一致，但工作量从 225×80 降到 15×80。
+ */
+export function legalMoves(board: BoardState, radius = 4): number[] {
+  const { table, stride } = neighborTable(Math.max(0, Math.floor(radius)));
+
+  legalBits.fill(0);
+  let placed = false;
+  for (let move = 0; move < N_CELLS; move++) {
+    if (board[move] === EMPTY) continue;
+    placed = true;
+    const base = move * stride;
+    for (let i = 0; i < stride; i++) {
+      const neighbor = table[base + i];
+      if (neighbor >= 0) legalBits[neighbor >>> 5] |= 1 << (neighbor & 31);
+    }
+  }
+
+  // 空盘没有可依托的棋子，直接给天元
+  if (!placed) return [idx(7, 7)];
+
+  const out: number[] = [];
+  for (let word = 0; word < LEGAL_WORDS; word++) {
+    const bits = legalBits[word];
+    if (bits === 0) continue;
+    const base = word << 5;
+    for (let bit = 0; bit < 32; bit++) {
+      if ((bits & (1 << bit)) === 0) continue;
+      const move = base + bit;
+      if (move < N_CELLS && board[move] === EMPTY) out.push(move);
     }
   }
   return out;

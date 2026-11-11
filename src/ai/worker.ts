@@ -27,6 +27,9 @@ type SearchMessage = {
   sampleTopK?: number;
   rootNoise?: RootNoise | null;
   lastMove?: number;
+  rootLimit?: number;
+  forcedPlies?: number;
+  vcfDepth?: number;
 };
 
 type CancelMessage = {
@@ -256,6 +259,9 @@ async function startSearch(message: SearchMessage): Promise<void> {
       sampleTopK: message.sampleTopK,
       rootNoise: message.rootNoise,
       lastMove: message.lastMove,
+      rootLimit: message.rootLimit,
+      forcedPlies: message.forcedPlies,
+      vcfDepth: message.vcfDepth,
       progressEvery: AI_CONFIG.progressEvery,
       onProgress: (progress) => {
         if (!token.cancelled) {

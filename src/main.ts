@@ -9,11 +9,12 @@ import {
   AI_CONFIG,
   DIFFICULTY_LABELS,
   DIFFICULTY_ORDER,
-  DIFFICULTY_SIMS,
-  isAiDifficulty,
-  OPPONENT_NOISE,
-  OPPONENT_TEMPERATURE,
+  ROOT_RADIUS,
+  LEAF_RADIUS,
   SAMPLE_TOP_K,
+  SEARCH_PROFILES,
+  isAiDifficulty,
+  toSearchOptions,
   type AiDifficulty,
 } from './game/ai-config';
 import {
@@ -113,7 +114,7 @@ let resultTimer = 0;
 let toastTimer = 0;
 let currentMascot: MascotState = 'idle';
 let cacheHits = 0;
-let lastSearch = { kind: '-', sims: 0, ms: 0 };
+let lastSearch = { kind: '-', sims: 0, ms: 0, depth: 0 };
 
 /* 台词相关的一次性状态，不持久化 */
 /** 本局开局是否要抗议「大肥鱼」这个外号 */
@@ -473,6 +474,12 @@ function applySkin(): void {
   audio.setSkin(settings.soundFollowsSkin ? settings.skin : 'wood');
 }
 
+/** 首页页脚的版本号；值由构建注入，来源是 package.json。 */
+function applyVersion(): void {
+  const label = document.getElementById('app-version');
+  if (label) label.textContent = `v${__APP_VERSION__}`;
+}
+
 /* ===== AI ===== */
 
 function ensureAi(): Promise<void> {
@@ -542,6 +549,7 @@ async function botMove(): Promise<void> {
           kind: '开局',
           sims: 0,
           ms: Math.round(performance.now() - started),
+          depth: 0,
         };
         state.thinking = false;
         place(move, true);
@@ -558,6 +566,7 @@ async function botMove(): Promise<void> {
             kind: '开局',
             sims: 0,
             ms: Math.round(performance.now() - started),
+            depth: 0,
           };
           state.thinking = false;
           place(move, true);
@@ -585,17 +594,16 @@ async function botMove(): Promise<void> {
     const player = state.current;
     const snapshot = new Uint8Array(state.board);
     const result = await client.search(snapshot, player, {
-      sims: DIFFICULTY_SIMS[settings.difficulty],
+      ...toSearchOptions(SEARCH_PROFILES[settings.difficulty]),
       topk: 0,
-      temperature: OPPONENT_TEMPERATURE[settings.difficulty],
       sampleTopK: SAMPLE_TOP_K,
-      rootNoise: OPPONENT_NOISE[settings.difficulty],
       lastMove: state.lastMove ?? -1,
     });
     lastSearch = {
       kind: '对手',
       sims: result.sims,
       ms: Math.round(performance.now() - started),
+      depth: result.depth ?? 0,
     };
     if (token !== gameToken || state.status !== 'playing' || state.current !== player) return;
     if (result.move < 0) {
@@ -638,7 +646,20 @@ async function requestHint(): Promise<void> {
     return;
   }
 
-  const key = `${AI_CONFIG.modelVersion}|${AI_CONFIG.radius}|${AI_CONFIG.hintSims}|${state.current}|${boardKey(state.board, state.current)}`;
+  const hint = SEARCH_PROFILES.hint;
+  // 键里不放 difficulty：提示走固定档，放进去只会让「切一次难度、提示缓存全失效」
+  const key = [
+    AI_CONFIG.engineVersion,
+    AI_CONFIG.modelVersion,
+    ROOT_RADIUS,
+    LEAF_RADIUS,
+    hint.sims,
+    hint.rootLimit,
+    hint.forcedPlies,
+    hint.vcfDepth,
+    state.current,
+    boardKey(state.board, state.current),
+  ].join('|');
   const cached = hintCache.get(key);
   if (cached) {
     cacheHits++;
@@ -669,7 +690,7 @@ async function requestHint(): Promise<void> {
     const snapshot = new Uint8Array(state.board);
 
     const result = await client.search(snapshot, player, {
-      sims: AI_CONFIG.hintSims,
+      ...toSearchOptions(SEARCH_PROFILES.hint),
       topk: AI_CONFIG.hintTopK,
     });
 
@@ -677,6 +698,7 @@ async function requestHint(): Promise<void> {
       kind: '提示',
       sims: result.sims,
       ms: Math.round(performance.now() - started),
+      depth: result.depth ?? 0,
     };
 
     if (token !== hintToken || result.cancelled) return;
@@ -1111,6 +1133,7 @@ function openAbout(): void {
   openModal(`
     <div class="modal">
       <h2>关于 / 署名</h2>
+      <p>版本 ${__APP_VERSION__} · 搜索引擎 ${AI_CONFIG.engineVersion}</p>
       <p>
         头像素材来自 DeepSeek 相关二创社区（“蓝色大肥鱼 / 鲸鱼娘”同人图），如有侵权请联系删除。
         背景音乐使用 B 站《Let me go 大肥鱼和用户深情对唱》（UP 主 @星落落_oi，BV13SYr6dEiQ），版权归原作者所有，如有侵权请联系删除。
@@ -1156,10 +1179,10 @@ function toggleBgm(): void {
 function updateDebug(): void {
   if (!debugEl) return;
   debugEl.textContent = [
-    'DaFeiYuGomo debug',
+    `DaFeiYuGomo debug v${__APP_VERSION__}`,
     `AI: ${aiStatus}${readyInfo ? ` (${readyInfo.backend}, ${readyInfo.threads} 线程)` : ''}`,
     readyInfo ? `load ${readyInfo.loadMs}ms · eval ${readyInfo.evalMs}ms · model ${(readyInfo.modelBytes / 1048576).toFixed(1)}MB` : 'model: -',
-    `last: ${lastSearch.kind} · ${lastSearch.sims} sims · ${lastSearch.ms}ms`,
+    `last: ${lastSearch.kind} · ${lastSearch.sims} sims · ${lastSearch.ms}ms · depth ${lastSearch.depth}`,
     `cache hits: ${cacheHits}`,
     `size: ${state.board.length} cells`,
     `mode=${state.mode} history=${state.history.length} current=${state.current} hint=${state.hint ? shortCoord(state.hint.move) : '-'} loading=${state.hintLoading}`,
@@ -1181,6 +1204,7 @@ homeMascot.innerHTML = '';
 mascotAvatar.innerHTML = '';
 installMascots();
 applySkin();
+applyVersion();
 refreshAll();
 
 const unlockAudio = () => {
