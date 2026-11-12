@@ -25,7 +25,7 @@ GitHub Pages 不发 `Cross-Origin-Opener-Policy` / `Cross-Origin-Embedder-Policy
 1. `npm run build` 必须过（含 `tsc --noEmit`）。
 2. `package.json` 的版本、`CHANGELOG.md` 的条目、`docs/versions/vX.Y.Z.md` 三处一致。
 3. 版本文件先写、再提交：技术档案和代码在同一次提交里，事后不用回头补。
-4. 被 `.gitignore` 忽略的目录（`docs/local/`、`tests/`、`assets/`、`public/ort/`）不要用 `git add -f` 强加。
+4. 被 `.gitignore` 忽略的目录不要用 `git add -f` 强加。
 
 ## 回滚
 

@@ -22,10 +22,16 @@ export const DIFFICULTY_LABELS: Record<AiDifficulty, string> = {
 };
 
 /**
- * 搜索预算：40·(√e)ⁿ，n 从 0 起。
- * 公式生成而不是手填——1.2.0 的提示预算 292 就是手填时算错的，第五项应为 296。
+ * 搜索预算：SIMS_BASE·SIMS_RATIOⁿ，n 从 0 起。
+ *
+ * 公式生成而不是手填——1.2.0 的提示预算 292 就是手填时算错的。
+ * 1.4.0 把首项从 40 降到 30，整体预算降约 25%，每候选访问次数从 5.0 降到 3.75 起；
+ * 公比单独成常量，之后试 √π 只改这一行。
  */
-const simsOf = (n: number): number => Math.round(40 * Math.pow(Math.E, n / 2));
+export const SIMS_BASE = 30;
+export const SIMS_RATIO = Math.sqrt(Math.E);
+
+const simsOf = (n: number): number => Math.round(SIMS_BASE * SIMS_RATIO ** n);
 
 /** 根节点保留的候选数：rootLimit 决定「谁上场」，与 SAMPLE_TOP_K（怎么抽）、hintTopK（展示几个）无关。 */
 export interface SearchProfile {
@@ -74,7 +80,7 @@ export const PRIOR_BIAS_STRENGTH = 2;
  */
 export const C_FPU = 0;
 
-/** 五个档位一张表。四档的 sims / τ / ε 与 1.2.0 完全一致，变的只是多了三个新旋钮。 */
+/** 五个档位一张表。 */
 export const SEARCH_PROFILES: Record<SearchTier, SearchProfile> = {
   easy: {
     sims: simsOf(0),
@@ -120,6 +126,20 @@ export const SEARCH_PROFILES: Record<SearchTier, SearchProfile> = {
   },
 };
 
+/**
+ * 复盘用的档位：直接展开困难档，只去掉随机性。
+ *
+ * 复盘必须可复现——同一局反复跑要得到同一组值和同一组最佳着，
+ * 温度与根噪声都会让「同一手两次评级不同」，所以两者都关掉。
+ * 困难档是 82 / 20 / 2 / 5：候选比普通档宽，战术层也更硬；
+ * 每候选访问次数仍是 4.1，换档不是把每条线搜得更深。
+ */
+export const REVIEW_PROFILE: SearchProfile = {
+  ...SEARCH_PROFILES.hard,
+  temperature: 0,
+  noise: null,
+};
+
 /** 根节点候选半径：远点由先验与阈值决定要不要留。 */
 export const ROOT_RADIUS = 4;
 
@@ -156,7 +176,7 @@ export function toSearchOptions(profile: SearchProfile): ProfileOptions {
 
 export const AI_CONFIG = {
   /** 搜索逻辑的版本，与模型版本正交：换模型不改它，改公式/候选/战术才改它。 */
-  engineVersion: 'mcts-1.3',
+  engineVersion: 'mcts-1.4',
   /** 提示返回并展示的候选数量。 */
   hintTopK: 3,
   progressEvery: 16,

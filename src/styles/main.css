@@ -662,6 +662,331 @@ button {
   line-height: 1.7;
 }
 
+/* ===== 复盘 ===== */
+
+.review {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(1100px 600px at 12% 0%, rgba(35, 75, 135, 0.2), transparent 62%),
+    radial-gradient(900px 500px at 100% 100%, rgba(70, 44, 110, 0.14), transparent 60%);
+}
+
+.review-body {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  gap: 20px;
+  padding: 20px;
+}
+
+.review-panel {
+  width: 360px;
+  flex: 0 0 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 0;
+  /* flex 子项的 min-width 默认是 min-content，会把整栏撑得比屏幕还宽 */
+  min-width: 0;
+  /* 矮屏时整栏可滚，避免列表被压成 0 高后操作按钮跑出屏幕 */
+  overflow: auto;
+}
+
+.review-summary {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 10px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.review-side {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(160, 190, 235, 0.05);
+}
+
+.review-side-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.review-side-head strong {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.review-side-score {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.review-side-counts {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.65;
+  color: #c8d8ee;
+  /* 只在「·」的空格处换行，别把「失误」拆成两行 */
+  word-break: keep-all;
+}
+
+.review-side-loss {
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.review-side-toggle {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(160, 190, 235, 0.06);
+}
+
+.review-chart-wrap {
+  position: relative;
+  /* 面板是 flex 列，高度不够时固定区块不能被压扁 */
+  flex: 0 0 auto;
+  height: 132px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(9, 15, 26, 0.6);
+  overflow: hidden;
+}
+
+#review-chart {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* 纵向留给面板滚动，横向留给曲线拖选 */
+  touch-action: pan-y;
+  cursor: crosshair;
+}
+
+.review-tooltip {
+  position: absolute;
+  z-index: 3;
+  max-width: 260px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: rgba(7, 12, 22, 0.95);
+  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+  color: #e7f1ff;
+  font-size: 11px;
+  line-height: 1.55;
+  pointer-events: none;
+}
+
+.review-progress {
+  flex: 0 0 auto;
+  height: 3px;
+  border-radius: 999px;
+  background: rgba(160, 190, 235, 0.14);
+  overflow: hidden;
+}
+
+.review-progress i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #57b6ff, #f0b95a);
+  transition: width 0.2s ease;
+}
+
+.review-controls {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-controls .ghost-btn {
+  flex: 1;
+  padding: 7px 0;
+  font-size: 12px;
+  text-align: center;
+}
+
+.review-detail {
+  flex: 0 0 auto;
+  min-height: 52px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(160, 190, 235, 0.05);
+  color: #e7f1ff;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.review-detail .muted {
+  color: var(--muted);
+}
+
+.review-detail-action {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.review-correct {
+  border: 1px solid rgba(240, 185, 90, 0.32);
+  border-radius: 8px;
+  background: rgba(240, 185, 90, 0.12);
+  color: #ffe4ae;
+  padding: 5px 11px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.16s ease;
+}
+
+.review-correct:hover:not(:disabled) {
+  background: rgba(240, 185, 90, 0.2);
+}
+
+.review-correct:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.review-list {
+  position: relative;
+  flex: 1;
+  min-height: 120px;
+  overflow: auto;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(9, 15, 26, 0.5);
+}
+
+.review-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.review-row:hover {
+  background: rgba(160, 190, 235, 0.08);
+}
+
+.review-row.current {
+  background: rgba(87, 182, 255, 0.14);
+  box-shadow: inset 0 0 0 1px rgba(87, 182, 255, 0.3);
+}
+
+.review-ply {
+  width: 24px;
+  flex: 0 0 24px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.review-coord {
+  width: 32px;
+  flex: 0 0 32px;
+  font-weight: 600;
+}
+
+.review-owner {
+  width: 28px;
+  flex: 0 0 28px;
+  color: var(--muted);
+}
+
+.review-badge {
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.review-badge.grade-best {
+  color: #ffe4ae;
+  background: rgba(240, 185, 90, 0.16);
+  border-color: rgba(240, 185, 90, 0.3);
+}
+
+.review-badge.grade-good {
+  color: #b7f0cd;
+  background: rgba(143, 227, 176, 0.12);
+  border-color: rgba(143, 227, 176, 0.24);
+}
+
+.review-badge.grade-inaccuracy {
+  color: #f3e0a6;
+  background: rgba(232, 197, 106, 0.13);
+  border-color: rgba(232, 197, 106, 0.26);
+}
+
+.review-badge.grade-mistake {
+  color: #ffd0a8;
+  background: rgba(240, 163, 90, 0.14);
+  border-color: rgba(240, 163, 90, 0.28);
+}
+
+.review-badge.grade-blunder {
+  color: #ffc2c2;
+  background: rgba(255, 107, 107, 0.14);
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+.review-badge.grade-opening {
+  color: var(--muted);
+  background: rgba(160, 190, 235, 0.08);
+  border-color: rgba(160, 190, 235, 0.18);
+}
+
+.review-row-tags {
+  margin-left: auto;
+  max-width: 42%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 10px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.review-actions {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-actions .btn {
+  flex: 1;
+  padding: 11px 8px;
+  font-size: 13px;
+}
+
 /* ===== 弹窗 ===== */
 
 .modal-backdrop {
@@ -1102,6 +1427,39 @@ input[type="range"] {
     padding-bottom: calc(10px + env(safe-area-inset-bottom));
   }
 
+  .review-body {
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    padding-bottom: calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .review-panel {
+    width: auto;
+    flex: 0 0 auto;
+    max-height: 46dvh;
+    overflow: auto;
+    gap: 8px;
+  }
+
+  .review-chart-wrap {
+    height: 110px;
+  }
+
+  /* 手机上先把「深度评估」露出来，列表放到最后自己滚 */
+  .review-actions {
+    order: 5;
+  }
+
+  .review-detail {
+    order: 6;
+  }
+
+  .review-list {
+    order: 7;
+    max-height: 34dvh;
+  }
+
   .board-wrap {
     flex: 1;
   }
@@ -1184,6 +1542,17 @@ input[type="range"] {
 
   .bubble p {
     font-size: 13px;
+  }
+}
+
+/* 笔记本高度下侧栏内容装不满一屏，先收掉说明文字，避免底部被切一半 */
+@media (max-height: 800px) and (min-width: 861px) {
+  .review-panel .side-note {
+    display: none;
+  }
+
+  .review-chart-wrap {
+    height: 118px;
   }
 }
 

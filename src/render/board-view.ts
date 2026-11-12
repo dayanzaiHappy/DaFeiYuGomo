@@ -69,7 +69,7 @@ export class BoardView {
   private bgCache: HTMLCanvasElement | null = null;
   private bgCacheKey = '';
   private raf = 0;
-  private anim: { move: number; start: number } | null = null;
+  private anim: { move: number; start: number; kind: 'place' | 'remove' } | null = null;
   private cursor = { row: 7, col: 7 };
   private focused = false;
   private lastPointer = '-';
@@ -119,7 +119,13 @@ export class BoardView {
   }
 
   animateMove(move: number): void {
-    this.anim = { move, start: performance.now() };
+    this.anim = { move, start: performance.now(), kind: 'place' };
+    this.scheduleAnimation();
+  }
+
+  /** 反向下子：缩小并淡出。复盘里「收回落错的子」用。 */
+  animateRemove(move: number): void {
+    this.anim = { move, start: performance.now(), kind: 'remove' };
     this.scheduleAnimation();
   }
 
@@ -317,24 +323,48 @@ export class BoardView {
     for (let move = 0; move < board.length; move++) {
       const player = board[move];
       if (player === EMPTY) continue;
-      this.drawStone(skin, move, player as Player, this.stoneScale(move));
+      this.drawStone(skin, move, player as Player, this.stoneScale(move), this.stoneAlpha(move));
     }
   }
 
+  /** 落子动画的进度；不匹配时返回 null。 */
+  private stoneProgress(move: number): number | null {
+    if (!this.anim || this.anim.move !== move) return null;
+    return Math.min(1, (performance.now() - this.anim.start) / this.animDuration());
+  }
+
+  private animDuration(): number {
+    return this.anim?.kind === 'remove' ? 190 : 170;
+  }
+
   private stoneScale(move: number): number {
-    if (!this.anim || this.anim.move !== move) return 1;
-    const t = Math.min(1, (performance.now() - this.anim.start) / 160);
+    const t = this.stoneProgress(move);
+    if (t === null) return 1;
+    if (this.anim?.kind === 'remove') return 1 - 0.72 * t;
     return 0.55 + 0.45 * (1 - Math.pow(1 - t, 3));
   }
 
-  private drawStone(skin: Skin, move: number, player: Player, scale: number): void {
+  private stoneAlpha(move: number): number {
+    const t = this.stoneProgress(move);
+    if (t === null) return 1;
+    return this.anim?.kind === 'remove' ? 1 - t : 1;
+  }
+
+  private drawStone(
+    skin: Skin,
+    move: number,
+    player: Player,
+    scale: number,
+    alpha: number,
+  ): void {
     const ctx = this.ctx;
     const x = this.padding + colOf(move) * this.cell;
     const y = this.padding + rowOf(move) * this.cell;
     const r = this.cell * 0.43 * scale;
-    if (r <= 0) return;
+    if (r <= 0 || alpha <= 0) return;
 
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.shadowColor = 'rgba(0,0,0,0.32)';
     ctx.shadowBlur = this.cell * 0.14;
     ctx.shadowOffsetY = this.cell * 0.05;
@@ -367,6 +397,7 @@ export class BoardView {
     ctx.restore();
 
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.strokeStyle = rim;
     ctx.lineWidth = Math.max(1, this.cell * 0.025);
     ctx.beginPath();
@@ -374,13 +405,13 @@ export class BoardView {
     ctx.stroke();
 
     if (isBlack) {
-      ctx.globalAlpha = 0.35;
+      ctx.globalAlpha = 0.35 * alpha;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(x - r * 0.34, y - r * 0.38, r * 0.16, 0, Math.PI * 2);
       ctx.fill();
     } else {
-      ctx.globalAlpha = 0.65;
+      ctx.globalAlpha = 0.65 * alpha;
       ctx.fillStyle = '#ffffff';
       ctx.beginPath();
       ctx.arc(x - r * 0.32, y - r * 0.36, r * 0.2, 0, Math.PI * 2);
@@ -392,15 +423,21 @@ export class BoardView {
   private drawLastMove(skin: Skin): void {
     const last = this.state.lastMove;
     if (last === null || last < 0) return;
+    const ctx = this.ctx;
+    // 棋子在做落子 / 收回动画时，标记跟着一起缩放，否则会出现浮在空中的红点
+    const animated = this.anim?.move === last;
+    const scale = animated ? this.stoneScale(last) : 1;
+    const alpha = animated ? this.stoneAlpha(last) : 1;
+    if (alpha <= 0) return;
     const x = this.padding + colOf(last) * this.cell;
     const y = this.padding + rowOf(last) * this.cell;
-    const ctx = this.ctx;
     ctx.save();
+    ctx.globalAlpha = alpha;
     ctx.fillStyle = skin.lastMove;
     ctx.shadowColor = skin.lastMove;
     ctx.shadowBlur = this.cell * 0.16;
     ctx.beginPath();
-    ctx.arc(x, y, Math.max(2.2, this.cell * 0.1), 0, Math.PI * 2);
+    ctx.arc(x, y, Math.max(2.2, this.cell * 0.1) * scale, 0, Math.PI * 2);
     ctx.fill();
     ctx.restore();
   }
@@ -499,7 +536,7 @@ export class BoardView {
     if (this.raf) return;
     const tick = () => {
       this.render();
-      if (this.anim && performance.now() - this.anim.start < 170) {
+      if (this.anim && performance.now() - this.anim.start < this.animDuration()) {
         this.raf = requestAnimationFrame(tick);
       } else {
         this.anim = null;

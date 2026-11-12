@@ -49,6 +49,10 @@
               <span>人 vs 机</span>
               <small>v2 + MCTS</small>
             </button>
+            <button id="home-import" class="btn btn-ghost" type="button">
+              <span>导入对局</span>
+              <small>打开 JSONL 复盘</small>
+            </button>
           </div>
           <p class="home-note">头像来自 DeepSeek 二创社区 · 如有侵权请联系删除</p>
         </main>
@@ -127,6 +131,72 @@
           </aside>
         </main>
       </section>
+
+      <section id="review-screen" class="screen review hidden" aria-label="复盘">
+        <header class="game-header">
+          <button id="review-back" class="ghost-btn back-btn" type="button">返回对局</button>
+          <div class="game-meta">
+            <span id="review-title" class="game-mode">复盘</span>
+            <span id="review-status" class="status-pill">未评估</span>
+          </div>
+          <div class="game-tools">
+            <button id="review-export" class="ghost-btn" type="button">导出 JSONL</button>
+          </div>
+        </header>
+
+        <main class="review-body">
+          <div class="board-wrap" id="review-board-wrap">
+            <div class="board-frame">
+              <canvas id="review-canvas" aria-label="复盘棋盘，只读"></canvas>
+            </div>
+          </div>
+
+          <aside class="review-panel">
+            <div id="review-summary" class="review-summary"></div>
+            <div class="review-side-toggle" id="review-side-toggle" role="group" aria-label="曲线视角">
+              <button class="difficulty-btn" data-side="human" aria-pressed="true" type="button">你的视角</button>
+              <button class="difficulty-btn" data-side="rival" aria-pressed="false" type="button">对手视角</button>
+            </div>
+            <div class="review-chart-wrap" id="review-chart-wrap">
+              <canvas id="review-chart" aria-label="估值曲线"></canvas>
+              <div id="review-tooltip" class="review-tooltip hidden"></div>
+            </div>
+            <div
+              id="review-progress"
+              class="review-progress hidden"
+              role="progressbar"
+              aria-label="评估进度"
+            >
+              <i id="review-progress-bar"></i>
+            </div>
+            <div class="review-controls">
+              <button id="review-first" class="ghost-btn" type="button" aria-label="回到开头">首</button>
+              <button id="review-prev" class="ghost-btn" type="button" aria-label="上一手">←</button>
+              <button id="review-play" class="ghost-btn" type="button">播放</button>
+              <button id="review-next" class="ghost-btn" type="button" aria-label="下一手">→</button>
+              <button id="review-last" class="ghost-btn" type="button" aria-label="跳到结尾">尾</button>
+              <button id="review-speed" class="ghost-btn" type="button" aria-label="播放速度">1x</button>
+            </div>
+            <div id="review-detail" class="review-detail">开局</div>
+            <ol id="review-list" class="review-list"></ol>
+            <div class="review-actions">
+              <button id="review-fast" class="btn btn-secondary" type="button">简易评估</button>
+              <button id="review-deep" class="btn btn-primary" type="button">深度评估</button>
+              <button id="review-stop" class="btn btn-ghost hidden" type="button">停止</button>
+            </div>
+            <p class="side-note">
+              估值为搜索评分，不是真实胜率；评级只反映估值损失，简易评估不评级。空格播放 / 暂停，← → 步进。
+            </p>
+          </aside>
+        </main>
+      </section>
+
+      <input
+        id="import-file"
+        type="file"
+        accept=".jsonl,application/x-ndjson,application/json,text/plain"
+        hidden
+      />
 
       <div id="modal-root"></div>
       <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>

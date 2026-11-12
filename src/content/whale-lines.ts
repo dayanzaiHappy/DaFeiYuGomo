@@ -96,6 +96,37 @@ export const WHALE_LINES = {
     medium: '稳。',
     low: '有点险，先这么走。',
   },
+
+  /** 复盘：评级徽标 */
+  reviewGrades: {
+    best: '最佳',
+    good: '尚可',
+    inaccuracy: '不精确',
+    mistake: '失误',
+    blunder: '败着',
+  },
+
+  /** 复盘：开局段（行棋方尚未进入可比较的局面） */
+  reviewOpening: '开局',
+  reviewOpeningNote: '开局不评级',
+
+  /** 复盘：规则标签的短文案 */
+  reviewTags: {
+    missedWin: '漏成五',
+    missedBlockFive: '漏挡五',
+    missedBlockOpenThree: '漏活三',
+    goodBlock: '好堵',
+    goodOpenFour: '活四',
+  },
+
+  /** 复盘：规则标签说成一句话。you / rival 分开，避免把对手的漏着说成你的。 */
+  reviewVerdicts: {
+    missedWin: { you: '你漏了自己的成五', rival: '对手漏了成五' },
+    missedBlockFive: { you: '你没挡住对手的成五', rival: '对手没挡住你的成五' },
+    missedBlockOpenThree: { you: '你漏了对手的活三', rival: '对手漏了你的活三' },
+    goodBlock: { you: '你堵住了必应点', rival: '对手堵住了必应点' },
+    goodOpenFour: { you: '你造出了活四', rival: '对手造出了活四' },
+  },
 } as const;
 
 /* ===== 抽取 ===== */

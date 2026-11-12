@@ -3,6 +3,7 @@
 import type { InferenceSession } from 'onnxruntime-web';
 import { AI_CONFIG } from '../game/ai-config';
 import { runSearch } from '../game/mcts';
+import { sha256Hex } from '../game/sha256';
 import type { Evaluator, Player, RootNoise, SearchProgress, SearchResult } from '../game/types';
 import { N_CELLS } from '../game/types';
 
@@ -53,6 +54,8 @@ type ReadyMessage = {
   loadMs: number;
   evalMs: number;
   modelBytes: number;
+  /** ONNX 字节的 SHA-256；记录对局时写进 header，证明复盘对应哪个模型。 */
+  modelHash: string;
 };
 
 type WorkerMessage =
@@ -231,6 +234,8 @@ async function init(message: InitMessage): Promise<ReadyMessage> {
       loadMs: Math.round(performance.now() - started),
       evalMs: Math.round(best.evalMs * 100) / 100,
       modelBytes: modelData.byteLength,
+      // 模型字节已经在手里，顺手算一次；记录里靠它说明「这份复盘对应哪个模型」
+      modelHash: `sha256:${sha256Hex(modelData)}`,
     };
     return readyInfo;
   })();

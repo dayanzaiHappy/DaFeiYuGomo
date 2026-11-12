@@ -6,6 +6,8 @@ export interface ReadyInfo {
   loadMs: number;
   evalMs: number;
   modelBytes: number;
+  /** ONNX 字节的 SHA-256，形如 `sha256:...`；写进对局记录用于说明模型来源。 */
+  modelHash: string;
 }
 
 export interface EvaluationResult {

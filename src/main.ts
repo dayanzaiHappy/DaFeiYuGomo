@@ -3,7 +3,10 @@ import { AiClient, type ReadyInfo } from './ai/client';
 import { AudioEngine } from './audio/engine';
 import { BgmPlayer } from './audio/bgm';
 import { loadSettings, saveSettings, type Settings } from './app/settings';
+import { ReviewController, type ReviewMode } from './app/review';
+import { parseRecord } from './game/record';
 import { BoardView, type BoardViewState } from './render/board-view';
+import { ReviewView } from './ui/review-view';
 import { getSkin, SKIN_LIST, type Skin } from './render/skins';
 import {
   AI_CONFIG,
@@ -71,6 +74,7 @@ interface GameState {
 
 const homeScreen = $('home-screen');
 const gameScreen = $('game-screen');
+const reviewScreen = $('review-screen');
 const homeMascot = $('home-mascot');
 const mascotAvatar = $('mascot-avatar');
 const modalRoot = $('modal-root');
@@ -164,6 +168,19 @@ const boardView = new BoardView(
     onDebug: () => updateDebug(),
   },
 );
+
+let review: ReviewController | null = null;
+/** 复盘从哪儿进来的：实战结算回对局，导入回首页。 */
+let reviewOrigin: 'game' | 'home' = 'game';
+
+const reviewView = new ReviewView({
+  getSkin: () => getSkin(settings.skin),
+  onBack: () => closeReview(),
+  onFast: () => void runReview('fast'),
+  onDeep: () => void runReview('deep'),
+  onStop: () => stopReview(),
+  onExport: () => exportReview(),
+});
 
 /* ===== 基础 UI ===== */
 
@@ -844,12 +861,20 @@ function showResultModal(): void {
       <h2 class="result-title">${title}</h2>
       <p class="result-sub">${subtitle}</p>
       <div class="result-actions">
+        ${
+          state.mode === 'pvai'
+            ? '<button class="btn btn-secondary" data-action="review" type="button">复盘</button>'
+            : ''
+        }
         <button class="btn btn-primary" data-action="restart" type="button">再来一局</button>
         <button class="btn btn-ghost" data-action="home" type="button">返回主菜单</button>
       </div>
     </div>
   `);
 
+  modalRoot.querySelector('[data-action="review"]')?.addEventListener('click', () => {
+    openReview();
+  });
   modalRoot.querySelector('[data-action="restart"]')?.addEventListener('click', () => {
     closeModal();
     restartGame();
@@ -915,6 +940,9 @@ function startGame(mode: Mode, humanColor: Player): void {
   gameToken++;
   hintToken++;
   aiClient?.cancelAll();
+  reviewView.close();
+  review = null;
+  reviewOrigin = 'game';
   resetLines();
   stopThinkingTick();
   undoCount = 0;
@@ -943,17 +971,135 @@ function goHome(): void {
   hintToken++;
   aiClient?.cancelAll();
   stopThinkingTick();
+  reviewView.close();
+  review = null;
+  reviewOrigin = 'game';
   state.thinking = false;
   state.hintLoading = false;
   showScreen('home');
 }
 
-function showScreen(screen: 'home' | 'game'): void {
+function showScreen(screen: 'home' | 'game' | 'review'): void {
   homeScreen.classList.toggle('hidden', screen !== 'home');
   gameScreen.classList.toggle('hidden', screen !== 'game');
+  reviewScreen.classList.toggle('hidden', screen !== 'review');
   if (screen === 'game') {
     requestAnimationFrame(() => boardView.resize());
+  } else if (screen === 'review') {
+    requestAnimationFrame(() => reviewView.resize());
   }
+}
+
+/* ===== 复盘 ===== */
+
+function openReview(): void {
+  if (state.mode !== 'pvai' || state.history.length === 0) return;
+  closeModal();
+  aiClient?.cancelAll();
+  state.thinking = false;
+  state.hintLoading = false;
+
+  review?.dispose();
+  review = new ReviewController({
+    history: state.history.map((item) => ({ ...item })),
+    humanColor: state.humanColor,
+    difficulty: settings.difficulty,
+    winner: state.winner,
+    createdAt: new Date().toISOString(),
+  });
+  reviewOrigin = 'game';
+
+  showScreen('review');
+  reviewView.open(review, readyInfo?.evalMs ?? 0);
+  // 简易评估是秒级的，进来先跑一遍；用户想深评再点按钮
+  void runReview('fast');
+}
+
+async function runReview(mode: ReviewMode): Promise<void> {
+  const controller = review;
+  if (!controller || controller.busy || controller.total === 0) return;
+  if (controller.source === 'imported') {
+    showToast('导入的记录是只读的', 2000);
+    return;
+  }
+  if (mode === 'fast' && controller.mode === 'deep') {
+    const ok = window.confirm('简易评估会用网络值覆盖当前的深度结果，继续吗？');
+    if (!ok) return;
+  }
+
+  try {
+    await ensureAi();
+    const client = aiClient;
+    if (!client) throw new Error('AI 引擎不可用');
+    if (review !== controller) return;
+    reviewView.setEvalMs(readyInfo?.evalMs ?? 0);
+    await controller.run(mode, client, () => {
+      if (review === controller) reviewView.refresh();
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('取消')) return;
+    if (review === controller) reviewView.refresh();
+    showToast(`复盘失败：${message}`, 2400);
+  }
+}
+
+function stopReview(): void {
+  review?.stop();
+  reviewView.refresh();
+}
+
+function closeReview(): void {
+  const origin = reviewOrigin;
+  reviewView.close();
+  review = null;
+  reviewOrigin = 'game';
+  if (origin === 'home') {
+    showScreen('home');
+    return;
+  }
+  showScreen('game');
+  if (state.status !== 'playing') showResultModal();
+}
+
+/** 首页导入：只读回放，不触发任何推理。 */
+async function importReview(file: File): Promise<void> {
+  try {
+    const parsed = parseRecord(await file.text());
+    const controller = ReviewController.fromRecord(parsed);
+    review?.dispose();
+    review = controller;
+    reviewOrigin = 'home';
+    showScreen('review');
+    reviewView.open(controller, readyInfo?.evalMs ?? 0);
+    showToast('已导入对局', 1500);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    showToast(`导入失败：${message}`, 2800);
+  }
+}
+
+function exportReview(): void {
+  const controller = review;
+  if (!controller) return;
+
+  const text = controller.exportRecord({
+    appVersion: __APP_VERSION__,
+    modelVersion: AI_CONFIG.modelVersion,
+    modelHash: readyInfo?.modelHash ?? null,
+  });
+  const now = new Date();
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}`;
+
+  const blob = new Blob([text], { type: 'application/x-ndjson' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `dafeiyugomo-${stamp}.jsonl`;
+  link.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('已导出 JSONL', 1600);
 }
 
 /* ===== 弹窗 ===== */
@@ -1255,6 +1401,14 @@ $('home-settings').addEventListener('click', openSettings);
 $('home-about').addEventListener('click', openAbout);
 $('game-settings').addEventListener('click', openSettings);
 $('game-back').addEventListener('click', goHome);
+
+const importInput = $<HTMLInputElement>('import-file');
+$('home-import').addEventListener('click', () => importInput.click());
+importInput.addEventListener('change', () => {
+  const file = importInput.files?.[0];
+  importInput.value = '';
+  if (file) void importReview(file);
+});
 soundButton.addEventListener('click', toggleSound);
 homeBgmButton.addEventListener('click', toggleBgm);
 gameBgmButton.addEventListener('click', toggleBgm);
