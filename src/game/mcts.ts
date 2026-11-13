@@ -1,6 +1,7 @@
 import { legalMoves, checkWin, isBoardFull, colOf, rowOf } from './board';
 import {
   C_FPU,
+  CRITICAL_SAMPLE_BOOST,
   LEAF_RADIUS,
   PRIOR_BIAS_STRENGTH,
   ROOT_PRIOR_FLOOR,
@@ -408,6 +409,10 @@ function applyRootNoise(
 /**
  * 在根节点 visits 前 sampleTopK 名里按 visits^(1/temperature) 加权随机。
  * 无已访问子节点时返回 null，由调用方退回 bestChild。
+ *
+ * `critical` 里的点（能成五、必须挡成五）权重再乘一个倍数：这类局面只有一个正确答案，
+ * 纯 τ 采样会把访问第一名换掉，而换掉的代价通常是立刻输。不直接取第一名是为了留住
+ * 「简单档偶尔看漏」的手感，倍数与漏挡率的标定见 ai-config.ts。
  */
 function sampleByVisits(
   root: Node,
@@ -415,6 +420,7 @@ function sampleByVisits(
   sampleTopK: number,
   temperature: number,
   random: () => number,
+  critical: ReadonlySet<number> = new Set(),
 ): Node | null {
   const candidates: Node[] = [];
   for (const childIndex of root.children) {
@@ -437,7 +443,9 @@ function sampleByVisits(
   const exponent = 1 / temperature;
   let total = 0;
   const weights = pool.map((node) => {
-    const weight = Math.pow(node.visits, exponent);
+    const weight =
+      Math.pow(node.visits, exponent) *
+      (critical.has(node.move) ? CRITICAL_SAMPLE_BOOST : 1);
     total += weight;
     return weight;
   });
@@ -547,6 +555,11 @@ export async function runSearch(
   const forced = rootLimit > 0 ? forcedMoves(root.grid, root.player) : [];
   const rootMoves =
     rootLimit > 0 ? shortlist(rootLegal, rootPolicy, rootLimit, forced) : rootLegal;
+  // 必挡 / 必胜的点：这几手没有「各有各的道理」，采样时单独加权（见 CRITICAL_SAMPLE_BOOST）
+  const criticalMoves = new Set<number>([
+    ...immediateWins(board, player),
+    ...immediateWins(board, player === BLACK ? 2 : 1),
+  ]);
   expand(0, { policy: rootPolicy, value: rootEval.value }, rootMoves);
 
   // 并集只保证必选点「上场」，先验仍是模型给的。先验为 0 的点 explore 项恒为 0，
@@ -640,7 +653,7 @@ export async function runSearch(
   const makeResult = (done: number, cancelled: boolean): SearchResult => {
     const sampled =
       temperature > 0.05
-        ? sampleByVisits(root, nodes, sampleTopK, temperature, random)
+        ? sampleByVisits(root, nodes, sampleTopK, temperature, random, criticalMoves)
         : null;
     const best = sampled ?? bestChild(root, nodes);
     const rootValue = root.visits > 0 ? 1 - root.score / root.visits : 0.5;

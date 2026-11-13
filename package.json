@@ -1,7 +1,7 @@
 {
   "name": "dafeiyugomo",
   "private": true,
-  "version": "1.4.0",
+  "version": "1.4.1",
   "type": "module",
   "description": "五子棋网页版 · DaFeiYuGomo",
   "scripts": {

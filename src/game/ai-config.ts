@@ -51,6 +51,19 @@ export interface SearchProfile {
 /** 温度采样只在 visits 前几名里选。 */
 export const SAMPLE_TOP_K = 3;
 
+/**
+ * 必挡 / 必胜着法在根节点采样里的权重倍数。
+ *
+ * 这两类点只有一个正确答案，τ 采样会把访问第一名换掉，而换掉的代价通常是一手输。
+ * 直接取第一名（倍数无穷大）等于把简单档仅有的「偶尔看漏」也拿掉，手感反而假；
+ * 给一个有限倍数，是「偶尔漏」和「不犯低级错」之间的折中。
+ *
+ * 标定（76 个必须挡局面，真实模型，简单档 30 次模拟，每局面一次抽样）：
+ *   ×1 → 7.8% 漏，×2 → 5.2%，×4 → 3.4%，×6 → 2.6%，×12 → 1.7%，取第一名 → 0%。
+ * 取 6：后手平均每局遇到约 3 次必须挡，折合十几局漏一次。
+ */
+export const CRITICAL_SAMPLE_BOOST = 6;
+
 /** 噪声支持集的质量护栏：先验不得低于 top1 的这个比例。 */
 export const NOISE_MIN_RATIO = 0.5;
 
@@ -176,7 +189,7 @@ export function toSearchOptions(profile: SearchProfile): ProfileOptions {
 
 export const AI_CONFIG = {
   /** 搜索逻辑的版本，与模型版本正交：换模型不改它，改公式/候选/战术才改它。 */
-  engineVersion: 'mcts-1.4',
+  engineVersion: 'mcts-1.4.1',
   /** 提示返回并展示的候选数量。 */
   hintTopK: 3,
   progressEvery: 16,
