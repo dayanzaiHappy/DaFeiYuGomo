@@ -1,3 +1,4 @@
+import { placeStone } from './board';
 import { analyzeMove } from './explain';
 import { immediateWins, openFourPoints } from './tactics';
 import { other, type BoardState, type Player } from './types';
@@ -50,6 +51,10 @@ export function judgeMove(
     if (openThreePoints.includes(move)) return 'goodBlock';
     // 自己冲四是对攻，先把先手抢过来，不判漏防
     if (analysis.createsFour) return null;
+    // 落子后重算一次：贴着活四的一端落子会把它降成冲四，那也是防守，
+    // 只按落子前的盘面判断会把「堵住一端」误报成漏堵。
+    const after = placeStone(boardBefore, move, player);
+    if (openFourPoints(after, other(player)).length === 0) return null;
     return 'missedBlockOpenThree';
   }
 

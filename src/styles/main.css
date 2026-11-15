@@ -987,6 +987,192 @@ button {
   font-size: 13px;
 }
 
+/* ===== 分析板 ===== */
+
+/* 版式与复盘共用 `.review-body` / `.review-panel`，这里只补分析板独有的块 */
+
+.analysis {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background:
+    radial-gradient(1100px 600px at 12% 0%, rgba(35, 75, 135, 0.2), transparent 62%),
+    radial-gradient(900px 500px at 100% 100%, rgba(70, 44, 110, 0.14), transparent 60%);
+}
+
+.eval-card {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(160, 190, 235, 0.05);
+}
+
+.eval-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.eval-head b {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.eval-meta {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 黑占左、白占右：底色就是白方，填充是黑方，所以「黑多少」直接读填充宽度 */
+.eval-bar {
+  height: 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: rgba(238, 245, 255, 0.9);
+  overflow: hidden;
+}
+
+.eval-bar i {
+  display: block;
+  height: 100%;
+  width: 50%;
+  background: #101927;
+  transition: width 160ms ease;
+}
+
+.eval-nums {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #c8d8ee;
+}
+
+.analysis-block {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.analysis-head {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.analysis-top {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.analysis-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(9, 15, 26, 0.5);
+  font-size: 12px;
+}
+
+.analysis-rank {
+  width: 16px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.analysis-coord {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.analysis-pct {
+  margin-left: auto;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.analysis-empty {
+  margin: 0;
+  padding: 6px 2px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.threat-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.threat-table th,
+.threat-table td {
+  padding: 5px 6px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+}
+
+.threat-table thead th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 11px;
+}
+
+.threat-table tbody th {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  font-weight: 500;
+}
+
+.threat-table tbody tr:last-child th,
+.threat-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.stone-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 10px;
+}
+
+.stone-dot.black {
+  background: #0e1522;
+  border: 1px solid rgba(160, 190, 235, 0.5);
+}
+
+.stone-dot.white {
+  background: #eef5ff;
+  border: 1px solid rgba(160, 190, 235, 0.5);
+}
+
+.analysis-controls {
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.analysis-controls .ghost-btn {
+  padding: 8px 4px;
+  font-size: 12px;
+}
+
 /* ===== 弹窗 ===== */
 
 .modal-backdrop {
@@ -1093,7 +1279,7 @@ button {
   font-weight: 600;
 }
 
-/* 四档难度：窄屏把开关组整体下移，避免把说明文字挤成一条细柱。 */
+/* 五档难度：窄屏把开关组整体下移，避免把说明文字挤成一条细柱。 */
 @media (max-width: 460px) {
   .field-difficulty {
     flex-direction: column;

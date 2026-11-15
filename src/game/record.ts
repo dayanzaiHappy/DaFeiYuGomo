@@ -22,7 +22,7 @@ export interface RecordHeaderInput {
   modelVersion: string;
   /** ONNX 字节的 SHA-256；加载失败或未提供时为 null。 */
   modelHash: string | null;
-  /** 复盘预算，形如 `82/20/2/5`；说明这份评级是在哪一档下算的。 */
+  /** 复盘预算，形如 `8/360000/24/14/6/9`；说明这份评级是在哪一档下算的。 */
   reviewProfile?: string;
   humanColor: Player;
   difficulty: AiDifficulty;

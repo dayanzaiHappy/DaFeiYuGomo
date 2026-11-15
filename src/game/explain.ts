@@ -153,9 +153,9 @@ export function buildHintView(
     confidence: confidenceFor(analysis, result.value),
   });
 
-  // value 是 MCTS 回传的搜索评分（Q 值），不是校准后的真实胜率，因此按“分”展示。
+  // value 是搜索分值经 tanh 压出来的展示值，不是校准后的真实胜率，因此按“分”展示。
   const chips = result.top
-    .filter((item: SearchTop) => item.visits > 0)
+    .filter((item: SearchTop) => item.visits === undefined || item.visits > 0)
     .slice(0, 3)
     .map((item, index) => ({
       rank: index + 1,

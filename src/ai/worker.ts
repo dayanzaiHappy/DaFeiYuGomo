@@ -1,10 +1,11 @@
 /// <reference lib="webworker" />
 
 import type { InferenceSession } from 'onnxruntime-web';
-import { AI_CONFIG } from '../game/ai-config';
-import { runSearch } from '../game/mcts';
+import type { AbProfile } from '../game/ai-config';
+import { searchAb } from '../game/search';
+import { toWinRate } from '../game/eval';
 import { sha256Hex } from '../game/sha256';
-import type { Evaluator, Player, RootNoise, SearchProgress, SearchResult } from '../game/types';
+import type { Player, SearchResult } from '../game/types';
 import { N_CELLS } from '../game/types';
 
 declare const self: DedicatedWorkerGlobalScope;
@@ -22,20 +23,7 @@ type SearchMessage = {
   id: string;
   board: Uint8Array;
   player: Player;
-  sims: number;
-  topk: number;
-  temperature?: number;
-  sampleTopK?: number;
-  rootNoise?: RootNoise | null;
-  lastMove?: number;
-  rootLimit?: number;
-  forcedPlies?: number;
-  vcfDepth?: number;
-};
-
-type CancelMessage = {
-  type: 'cancel';
-  id: string;
+  ab: AbProfile;
 };
 
 type EvaluateMessage = {
@@ -45,7 +33,7 @@ type EvaluateMessage = {
   player: Player;
 };
 
-type MainMessage = InitMessage | SearchMessage | CancelMessage | EvaluateMessage;
+type MainMessage = InitMessage | SearchMessage | EvaluateMessage;
 
 type ReadyMessage = {
   type: 'ready';
@@ -61,7 +49,6 @@ type ReadyMessage = {
 type WorkerMessage =
   | ReadyMessage
   | { type: 'init-error'; message: string }
-  | { type: 'progress'; id: string; progress: SearchProgress }
   | { type: 'result'; id: string; result: SearchResult }
   | { type: 'eval-result'; id: string; policy: Float32Array; value: number }
   | { type: 'error'; id?: string; message: string };
@@ -70,7 +57,13 @@ const post = (message: WorkerMessage) => self.postMessage(message);
 
 let ort: OrtModule | null = null;
 
-class OrtEvaluator implements Evaluator {
+/**
+ * 只用一次前向给开局应手排个序。
+ *
+ * 搜索本身不依赖它：alpha-beta 的叶子是手写评估，模型只在「玩家先手、AI 下第二手」
+ * 这一处被用到，拿策略头在几个贴身的点里挑一个。
+ */
+class OrtEvaluator {
   constructor(private readonly session: InferenceSession) {}
 
   async evaluate(board: Uint8Array, player: Player): Promise<{ policy: Float32Array; value: number }> {
@@ -97,11 +90,10 @@ class OrtEvaluator implements Evaluator {
   }
 }
 
-let evaluator: Evaluator | null = null;
+let evaluator: OrtEvaluator | null = null;
 let readyInfo: ReadyMessage | null = null;
 let initPromise: Promise<ReadyMessage> | null = null;
-let active: { id: string; cancelled: boolean } | null = null;
-let pending: SearchMessage | null = null;
+let searchChain: Promise<void> = Promise.resolve();
 
 function numThreads(): number {
   // GitHub Pages 无法提供 COOP/COEP，ORT 多线程不可用；固定单线程最稳。
@@ -247,45 +239,57 @@ async function init(message: InitMessage): Promise<ReadyMessage> {
   }
 }
 
+/**
+ * 一次搜索。
+ *
+ * 先做一次模型前向拿 policy，只用于根节点在**同一威胁档内**的排序；
+ * 前向失败就退回纯威胁分排序，搜索本身不依赖模型。
+ * 之后的 alpha-beta 是同步的，跑满预算才返回，所以请求按链式排队，不并发。
+ */
 async function startSearch(message: SearchMessage): Promise<void> {
-  if (!evaluator) {
-    post({ type: 'error', id: message.id, message: 'AI 引擎尚未加载' });
-    return;
+  let prior: Float32Array | null = null;
+  if (evaluator) {
+    try {
+      prior = (await evaluator.evaluate(message.board, message.player)).policy;
+    } catch {
+      prior = null;
+    }
   }
 
-  const token = { id: message.id, cancelled: false };
-  active = token;
-
   try {
-    const result = await runSearch(message.board, message.player, evaluator, {
-      sims: message.sims,
-      topk: message.topk,
-      temperature: message.temperature,
-      sampleTopK: message.sampleTopK,
-      rootNoise: message.rootNoise,
-      lastMove: message.lastMove,
-      rootLimit: message.rootLimit,
-      forcedPlies: message.forcedPlies,
-      vcfDepth: message.vcfDepth,
-      progressEvery: AI_CONFIG.progressEvery,
-      onProgress: (progress) => {
-        if (!token.cancelled) {
-          post({ type: 'progress', id: message.id, progress });
-        }
-      },
-      shouldCancel: () => token.cancelled,
+    const result = searchAb(message.board, message.player, {
+      depth: message.ab.depth,
+      nodes: message.ab.nodes,
+      widthRoot: message.ab.widthRoot,
+      widthInner: message.ab.widthInner,
+      qDepth: message.ab.qDepth,
+      vcfDepth: message.ab.vcfDepth,
+      multiPV: message.ab.multiPV,
+      noise: message.ab.noise,
+      bias: message.ab.bias,
+      rootPrior: prior,
     });
-    post({ type: 'result', id: message.id, result });
+    post({
+      type: 'result',
+      id: message.id,
+      result: {
+        move: result.move,
+        value: result.value,
+        nodes: result.nodes,
+        // 只有前 multiPV 个是确切分，其余是零窗口边界值，不往外给
+        top: result.top.slice(0, Math.max(1, message.ab.multiPV)).map((item) => ({
+          move: item.move,
+          value: toWinRate(item.score),
+          score: item.score,
+        })),
+        depth: result.depth,
+        aborted: result.aborted,
+      },
+    });
   } catch (error) {
+    // 搜索抛异常时必须回一条 error：否则主线程的 Promise 永远悬着，界面只会一直「思考中」
     const text = error instanceof Error ? error.message : String(error);
     post({ type: 'error', id: message.id, message: text });
-  } finally {
-    if (active === token) active = null;
-    if (pending) {
-      const next = pending;
-      pending = null;
-      void startSearch(next);
-    }
   }
 }
 
@@ -323,23 +327,14 @@ self.onmessage = async (event: MessageEvent<MainMessage>) => {
     return;
   }
 
-  if (message.type === 'cancel') {
-    if (active?.id === message.id) active.cancelled = true;
-    if (pending?.id === message.id) pending = null;
-    return;
-  }
-
   if (message.type === 'evaluate') {
     void evaluateBoard(message);
     return;
   }
 
   if (message.type === 'search') {
-    if (active) {
-      active.cancelled = true;
-      pending = message;
-      return;
-    }
-    void startSearch(message);
+    // 前向是异步的，两个请求可能在 await 处交错；用一条链保证串行
+    searchChain = searchChain.then(() => startSearch(message)).catch(() => {});
   }
 };
+

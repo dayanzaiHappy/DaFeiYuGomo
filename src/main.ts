@@ -4,20 +4,20 @@ import { AudioEngine } from './audio/engine';
 import { BgmPlayer } from './audio/bgm';
 import { loadSettings, saveSettings, type Settings } from './app/settings';
 import { ReviewController, type ReviewMode } from './app/review';
+import { AnalysisController, type AnalysisMode } from './app/analysis';
 import { parseRecord } from './game/record';
 import { BoardView, type BoardViewState } from './render/board-view';
 import { ReviewView } from './ui/review-view';
+import { AnalysisView } from './ui/analysis-view';
 import { getSkin, SKIN_LIST, type Skin } from './render/skins';
 import {
+  AB_PROFILES,
   AI_CONFIG,
   DIFFICULTY_LABELS,
   DIFFICULTY_ORDER,
   ROOT_RADIUS,
   LEAF_RADIUS,
-  SAMPLE_TOP_K,
-  SEARCH_PROFILES,
   isAiDifficulty,
-  toSearchOptions,
   type AiDifficulty,
 } from './game/ai-config';
 import {
@@ -41,7 +41,7 @@ import {
 import { HintCache } from './game/hint-cache';
 import { mascotSvg, type MascotState } from './ui/mascot';
 import type { Player, SearchResult } from './game/types';
-import { BLACK, WHITE } from './game/types';
+import { BLACK, WHITE, other } from './game/types';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -75,6 +75,7 @@ interface GameState {
 const homeScreen = $('home-screen');
 const gameScreen = $('game-screen');
 const reviewScreen = $('review-screen');
+const analysisScreen = $('analysis-screen');
 const homeMascot = $('home-mascot');
 const mascotAvatar = $('mascot-avatar');
 const modalRoot = $('modal-root');
@@ -118,7 +119,7 @@ let resultTimer = 0;
 let toastTimer = 0;
 let currentMascot: MascotState = 'idle';
 let cacheHits = 0;
-let lastSearch = { kind: '-', sims: 0, ms: 0, depth: 0 };
+let lastSearch = { kind: '-', nodes: 0, ms: 0, depth: 0 };
 
 /* 台词相关的一次性状态，不持久化 */
 /** 本局开局是否要抗议「大肥鱼」这个外号 */
@@ -172,6 +173,8 @@ const boardView = new BoardView(
 let review: ReviewController | null = null;
 /** 复盘从哪儿进来的：实战结算回对局，导入回首页。 */
 let reviewOrigin: 'game' | 'home' = 'game';
+/** 分析板只从复盘进入，退出时回到复盘原位。 */
+let analysis: AnalysisController | null = null;
 
 const reviewView = new ReviewView({
   getSkin: () => getSkin(settings.skin),
@@ -180,6 +183,14 @@ const reviewView = new ReviewView({
   onDeep: () => void runReview('deep'),
   onStop: () => stopReview(),
   onExport: () => exportReview(),
+  onAnalyze: (index) => openAnalysis(index),
+});
+
+const analysisView = new AnalysisView({
+  getSkin: () => getSkin(settings.skin),
+  onBack: () => closeAnalysis(),
+  onRequest: (mode) => void runAnalysis(mode),
+  onPlaced: () => audio.play('place'),
 });
 
 /* ===== 基础 UI ===== */
@@ -546,7 +557,7 @@ async function botMove(): Promise<void> {
 
   const token = gameToken;
 
-  // 玩家先手时，AI 白棋第一手只做一次 policy 前向，不跑 MCTS。
+  // 玩家先手时，AI 白棋第一手只做一次 policy 前向，不跑搜索。
   if (state.history.length === 1 && state.current === WHITE) {
     const humanMove = state.history[0].move;
     const started = performance.now();
@@ -564,7 +575,7 @@ async function botMove(): Promise<void> {
       if (move >= 0) {
         lastSearch = {
           kind: '开局',
-          sims: 0,
+          nodes: 0,
           ms: Math.round(performance.now() - started),
           depth: 0,
         };
@@ -581,7 +592,7 @@ async function botMove(): Promise<void> {
         if (move >= 0) {
           lastSearch = {
             kind: '开局',
-            sims: 0,
+            nodes: 0,
             ms: Math.round(performance.now() - started),
             depth: 0,
           };
@@ -611,14 +622,11 @@ async function botMove(): Promise<void> {
     const player = state.current;
     const snapshot = new Uint8Array(state.board);
     const result = await client.search(snapshot, player, {
-      ...toSearchOptions(SEARCH_PROFILES[settings.difficulty]),
-      topk: 0,
-      sampleTopK: SAMPLE_TOP_K,
-      lastMove: state.lastMove ?? -1,
+      ab: { ...AB_PROFILES[settings.difficulty] },
     });
     lastSearch = {
       kind: '对手',
-      sims: result.sims,
+      nodes: result.nodes,
       ms: Math.round(performance.now() - started),
       depth: result.depth ?? 0,
     };
@@ -663,16 +671,17 @@ async function requestHint(): Promise<void> {
     return;
   }
 
-  const hint = SEARCH_PROFILES.hint;
+  const hint = AB_PROFILES.hint;
   // 键里不放 difficulty：提示走固定档，放进去只会让「切一次难度、提示缓存全失效」
+  // 引擎版本要进来：分值口径一变，旧缓存里的分数就不再对应同一套搜索
   const key = [
     AI_CONFIG.engineVersion,
     AI_CONFIG.modelVersion,
     ROOT_RADIUS,
     LEAF_RADIUS,
-    hint.sims,
-    hint.rootLimit,
-    hint.forcedPlies,
+    hint.nodes,
+    hint.widthRoot,
+    hint.qDepth,
     hint.vcfDepth,
     state.current,
     boardKey(state.board, state.current),
@@ -706,19 +715,17 @@ async function requestHint(): Promise<void> {
     const player = state.current;
     const snapshot = new Uint8Array(state.board);
 
-    const result = await client.search(snapshot, player, {
-      ...toSearchOptions(SEARCH_PROFILES.hint),
-      topk: AI_CONFIG.hintTopK,
-    });
+    const result = await client.search(snapshot, player, { ab: { ...AB_PROFILES.hint } });
 
     lastSearch = {
       kind: '提示',
-      sims: result.sims,
+      nodes: result.nodes,
       ms: Math.round(performance.now() - started),
       depth: result.depth ?? 0,
     };
 
-    if (token !== hintToken || result.cancelled) return;
+    // 预算耗尽是正常中止，结果来自上一层完整迭代；只有盘面变了才丢
+    if (token !== hintToken) return;
     hintCache.set(key, result);
     state.hint = result;
     state.hintLoading = false;
@@ -943,6 +950,9 @@ function startGame(mode: Mode, humanColor: Player): void {
   reviewView.close();
   review = null;
   reviewOrigin = 'game';
+  analysis?.dispose();
+  analysisView.close();
+  analysis = null;
   resetLines();
   stopThinkingTick();
   undoCount = 0;
@@ -974,19 +984,25 @@ function goHome(): void {
   reviewView.close();
   review = null;
   reviewOrigin = 'game';
+  analysis?.dispose();
+  analysisView.close();
+  analysis = null;
   state.thinking = false;
   state.hintLoading = false;
   showScreen('home');
 }
 
-function showScreen(screen: 'home' | 'game' | 'review'): void {
+function showScreen(screen: 'home' | 'game' | 'review' | 'analysis'): void {
   homeScreen.classList.toggle('hidden', screen !== 'home');
   gameScreen.classList.toggle('hidden', screen !== 'game');
   reviewScreen.classList.toggle('hidden', screen !== 'review');
+  analysisScreen.classList.toggle('hidden', screen !== 'analysis');
   if (screen === 'game') {
     requestAnimationFrame(() => boardView.resize());
   } else if (screen === 'review') {
     requestAnimationFrame(() => reviewView.resize());
+  } else if (screen === 'analysis') {
+    requestAnimationFrame(() => analysisView.resize());
   }
 }
 
@@ -1077,6 +1093,63 @@ async function importReview(file: File): Promise<void> {
     const message = error instanceof Error ? error.message : String(error);
     showToast(`导入失败：${message}`, 2800);
   }
+}
+
+/* ===== 分析板 ===== */
+
+/**
+ * 从复盘当前看到的那一手接着摆。
+ *
+ * 只取前 `position` 手与那一手的盘面，之后的所有改动都落在分析控制器自己的副本上；
+ * 复盘控制器原样保留，退出去还能接着看。
+ */
+function openAnalysis(position: number): void {
+  const source = review;
+  if (!source) return;
+
+  // 分析板和复盘共用同一个 Worker，深评还在跑就先停掉，免得两边的结果互相排队
+  source.stop();
+  analysis?.dispose();
+  const history = source.snapshot.history.slice(0, position);
+  analysis = new AnalysisController({
+    board: source.boardAt(position),
+    history,
+    toMove: history.length === 0 ? BLACK : other(history[history.length - 1].player),
+  });
+
+  showScreen('analysis');
+  analysisView.open(analysis);
+  analysisView.analyze();
+}
+
+function closeAnalysis(): void {
+  analysis?.dispose();
+  analysisView.close();
+  analysis = null;
+  showScreen('review');
+  // 复盘屏停过一次搜索，状态行要重新算
+  reviewView.refresh();
+}
+
+async function runAnalysis(mode: AnalysisMode): Promise<void> {
+  const controller = analysis;
+  if (!controller) return;
+
+  try {
+    await ensureAi();
+  } catch (error) {
+    if (analysis !== controller) return;
+    const message = error instanceof Error ? error.message : String(error);
+    showToast(`AI 加载失败：${message}`, 2400);
+    analysisView.refresh();
+    return;
+  }
+
+  const client = aiClient;
+  if (!client || analysis !== controller) return;
+  await controller.request(mode, client, () => {
+    if (analysis === controller) analysisView.refresh();
+  });
 }
 
 function exportReview(): void {
@@ -1180,7 +1253,7 @@ function openSettings(): void {
       <div class="field field-difficulty">
         <div class="field-label">
           <strong>AI 难度</strong>
-          <small>四档难度：简单 / 普通 / 困难 / 地狱，逐级加大搜索预算。</small>
+          <small>五档难度：菜鸟 / 简单 / 普通 / 困难 / 地狱，逐级加大搜索预算。</small>
         </div>
         <div class="difficulty-group" role="group" aria-label="AI 难度">
           ${difficultyButtons}
@@ -1328,7 +1401,7 @@ function updateDebug(): void {
     `DaFeiYuGomo debug v${__APP_VERSION__}`,
     `AI: ${aiStatus}${readyInfo ? ` (${readyInfo.backend}, ${readyInfo.threads} 线程)` : ''}`,
     readyInfo ? `load ${readyInfo.loadMs}ms · eval ${readyInfo.evalMs}ms · model ${(readyInfo.modelBytes / 1048576).toFixed(1)}MB` : 'model: -',
-    `last: ${lastSearch.kind} · ${lastSearch.sims} sims · ${lastSearch.ms}ms · depth ${lastSearch.depth}`,
+    `last: ${lastSearch.kind} · ${lastSearch.nodes} nodes · ${lastSearch.ms}ms · depth ${lastSearch.depth}`,
     `cache hits: ${cacheHits}`,
     `size: ${state.board.length} cells`,
     `mode=${state.mode} history=${state.history.length} current=${state.current} hint=${state.hint ? shortCoord(state.hint.move) : '-'} loading=${state.hintLoading}`,

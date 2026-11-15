@@ -24,7 +24,7 @@ index.html
 | 入口 | `src/main.ts` | 状态机、事件绑定、DOM 更新 | 全部下层 |
 | 视图 | `src/render/` `src/ui/` `src/styles/` | 只画，不改规则 | `game/types` |
 | 交互 | `src/audio/` `src/app/` | 音效、设置读写、复盘队列 | `game/` `ai/client` |
-| 规则与搜索 | `src/game/` | 棋盘、胜负、MCTS、战术、解释 | 仅 `game/types`，纯函数 |
+| 规则与搜索 | `src/game/` | 棋盘、胜负、alpha-beta 搜索、评估、战术、解释 | 仅 `game/types`，纯函数 |
 | 推理 | `src/ai/` | Worker 协议与 ONNX 会话 | `game/types` |
 
 `src/game/` 是纯函数，不碰 DOM 也不碰 Worker；推理由入口层通过 `AiClient` 发起，拿到 `SearchResult` 再交回 `game/explain` 生成解释。这样搜索逻辑可以在 Node 里直接跑，不需要浏览器环境。
@@ -36,10 +36,10 @@ index.html
   → BoardView 换算成 move
   → main.ts 校验（是否轮到人、格子是否为空）
   → board.ts placeStone → checkWin
-  → 需要 AI 时：aiConfig 取档位 → toSearchOptions → AiClient.search
-      → Worker: 编码 planes → session.run → policy/value
-      → mcts.ts: VCF 快检 → 候选截断 → N 次模拟（选择/扩展/评估/回传）
-      → 采样出 move → 回传 SearchResult
+  → 需要 AI 时：aiConfig 取档位 → AiClient.search
+      → Worker: 一次 policy 前向（只给根节点同档排序用）→ search.ts: 根节点 VCF 快检
+      → 候选按威胁档分组、组内按 policy 排序 → 迭代加深 negamax/PVS
+      → 叶节点走静态战术层与手写评估 → 根节点采样出 move → 回传 SearchResult
   → board.ts placeStone → render/board-view 重绘 → 音效 → 气泡文案
 ```
 
@@ -56,7 +56,7 @@ index.html
   → main.ts 快照 history（只读，不碰对局状态）
   → app/review.ts 建局面点与每步盘面
   → 简易：AiClient.evaluate 逐局面一次
-    深度：AiClient.search 逐局面 82 sims（REVIEW_PROFILE）
+    深度：AiClient.search 逐局面跑提示档（REVIEW_PROFILE = AB_PROFILES.hint）
   → game/review.ts 派生：人类视角、估值损失、评级、汇总
   → ui/review-view.ts 画第二块棋盘、估值曲线、着手列表
 

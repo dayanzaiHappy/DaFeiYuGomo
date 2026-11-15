@@ -3,7 +3,6 @@ import {
   AI_CONFIG,
   REVIEW_PROFILE,
   isAiDifficulty,
-  toSearchOptions,
   type AiDifficulty,
 } from '../game/ai-config';
 import { buildRecord, type ParsedRecord } from '../game/record';
@@ -180,10 +179,16 @@ export class ReviewController {
     return { mode: this.mode ?? 'fast', done: this.done, total: this.total, busy: this.busy };
   }
 
-  /** 深评剩余时间的粗估：一次模拟约等于一次前向。 */
+  /**
+   * 深评剩余时间的粗估。
+   *
+   * 简易评估是一次前向，直接按实测毫秒乘；深评的主体是节点数，与前向无关，
+   * 按本机实测吞吐粗算（95k~130k 节点/秒，取 100k 做分母）。
+   */
   remainingSeconds(evalMs: number): number {
-    const perPoint = this.mode === 'deep' ? REVIEW_PROFILE.sims : 1;
-    return Math.max(0, (this.total - this.done) * perPoint * evalMs) / 1000;
+    const left = Math.max(0, this.total - this.done);
+    if (this.mode !== 'deep') return (left * evalMs) / 1000;
+    return (left * REVIEW_PROFILE.nodes) / 100_000;
   }
 
   boardAt(index: number): BoardState {
@@ -224,13 +229,12 @@ export class ReviewController {
           if (this.token !== token) return;
           const point = this.points[i];
           const result = await engine.search(new Uint8Array(this.boards[i]), point.player, {
-            ...toSearchOptions(REVIEW_PROFILE),
-            topk: AI_CONFIG.hintTopK,
+            ab: { ...REVIEW_PROFILE },
           });
           if (this.token !== token) return;
           setPointValue(point, result.value, this.snapshot.humanColor, 'deep');
           point.bestMove = result.move >= 0 ? result.move : null;
-          point.top = result.top.filter((item) => item.visits > 0);
+          point.top = result.top.filter((item) => item.visits === undefined || item.visits > 0);
           this.done = i + 1;
           this.refreshMoves();
           onChange();
@@ -273,10 +277,13 @@ export class ReviewController {
         engineVersion: AI_CONFIG.engineVersion,
         modelVersion: options.modelVersion,
         modelHash: options.modelHash,
+        // 复盘预算写全六个参数：depth/nodes/根宽/内宽/qDepth/vcfDepth
         reviewProfile: [
-          REVIEW_PROFILE.sims,
-          REVIEW_PROFILE.rootLimit,
-          REVIEW_PROFILE.forcedPlies,
+          REVIEW_PROFILE.depth,
+          REVIEW_PROFILE.nodes,
+          REVIEW_PROFILE.widthRoot,
+          REVIEW_PROFILE.widthInner,
+          REVIEW_PROFILE.qDepth,
           REVIEW_PROFILE.vcfDepth,
         ].join('/'),
         humanColor: this.snapshot.humanColor,

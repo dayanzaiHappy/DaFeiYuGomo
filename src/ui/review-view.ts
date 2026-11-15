@@ -71,6 +71,8 @@ export interface ReviewViewOptions {
   onDeep: () => void;
   onStop: () => void;
   onExport: () => void;
+  /** 把当前看到的手数交给分析板：分析从这一手接着摆，不从空盘重来。 */
+  onAnalyze: (index: number) => void;
 }
 
 export class ReviewView {
@@ -114,10 +116,12 @@ export class ReviewView {
       getSkin: options.getSkin,
     });
 
-    this.backButton.addEventListener('click', () => options.onBack());    this.fastButton.addEventListener('click', () => options.onFast());
+    this.backButton.addEventListener('click', () => options.onBack());
+    this.fastButton.addEventListener('click', () => options.onFast());
     this.deepButton.addEventListener('click', () => options.onDeep());
     this.stopButton.addEventListener('click', () => options.onStop());
     this.exportButton.addEventListener('click', () => options.onExport());
+    el('review-analyze').addEventListener('click', () => options.onAnalyze(this.index));
 
     el('review-first').addEventListener('click', () => this.seek(0));
     el('review-prev').addEventListener('click', () => this.step(-1));

@@ -1,4 +1,5 @@
-import type { Player, RootNoise, SearchProgress, SearchResult } from '../game/types';
+import type { AbProfile } from '../game/ai-config';
+import type { Player, SearchResult } from '../game/types';
 
 export interface ReadyInfo {
   backend: string;
@@ -18,7 +19,6 @@ export interface EvaluationResult {
 interface PendingRequest {
   resolve: (result: SearchResult) => void;
   reject: (error: Error) => void;
-  onProgress?: (progress: SearchProgress) => void;
 }
 
 interface PendingEvaluation {
@@ -27,18 +27,15 @@ interface PendingEvaluation {
 }
 
 export interface SearchRequest {
-  sims: number;
-  topk: number;
-  temperature?: number;
-  sampleTopK?: number;
-  rootNoise?: RootNoise | null;
-  lastMove?: number;
-  rootLimit?: number;
-  forcedPlies?: number;
-  vcfDepth?: number;
-  onProgress?: (progress: SearchProgress) => void;
+  ab: AbProfile;
 }
 
+/**
+ * Worker 客户端。
+ *
+ * 搜索是同步的、不可打断的：`cancelAll` 只是把等待中的 Promise 立刻拒掉，
+ * Worker 里那一轮仍会跑完，结果因为找不到等待者而被丢弃。
+ */
 export class AiClient {
   private worker: Worker | null = null;
   private ready: Promise<ReadyInfo> | null = null;
@@ -70,7 +67,11 @@ export class AiClient {
       };
 
       worker.onerror = (event) => {
-        fail(new Error(event.message || 'AI Worker 启动失败'));
+        // Worker 里未捕获的异常不会再回消息，这里必须把等待者全部拒掉，
+        // 否则界面会一直停在「思考中」，连错误提示都出不来
+        const error = new Error(event.message || 'AI Worker 启动失败');
+        this.rejectPending(error);
+        fail(error);
       };
 
       worker.onmessage = (event: MessageEvent) => {
@@ -95,11 +96,6 @@ export class AiClient {
             this.pending.delete(message.id);
             request.resolve(message.result as SearchResult);
           }
-          return;
-        }
-        if (message.type === 'progress' && message.id) {
-          const request = this.pending.get(message.id);
-          request?.onProgress?.(message.progress as SearchProgress);
           return;
         }
         if (message.type === 'eval-result' && message.id) {
@@ -141,11 +137,7 @@ export class AiClient {
     return this.ready;
   }
 
-  async search(
-    board: Uint8Array,
-    player: Player,
-    request: SearchRequest,
-  ): Promise<SearchResult> {
+  async search(board: Uint8Array, player: Player, request: SearchRequest): Promise<SearchResult> {
     await this.ensureReady();
     const worker = this.worker;
     if (!worker) throw new Error('AI Worker 不可用');
@@ -153,28 +145,21 @@ export class AiClient {
     const id = `s${++this.sequence}`;
     const copy = new Uint8Array(board);
     return new Promise<SearchResult>((resolve, reject) => {
-      this.pending.set(id, { resolve, reject, onProgress: request.onProgress });
+      this.pending.set(id, { resolve, reject });
       worker.postMessage(
         {
           type: 'search',
           id,
           board: copy,
           player,
-          sims: request.sims,
-          topk: request.topk,
-          temperature: request.temperature,
-          sampleTopK: request.sampleTopK,
-          rootNoise: request.rootNoise,
-          lastMove: request.lastMove,
-          rootLimit: request.rootLimit,
-          forcedPlies: request.forcedPlies,
-          vcfDepth: request.vcfDepth,
+          ab: request.ab,
         },
         [copy.buffer],
       );
     });
   }
 
+  /** 一次网络前向，给开局应手排序用。 */
   async evaluate(board: Uint8Array, player: Player): Promise<EvaluationResult> {
     await this.ensureReady();
     const worker = this.worker;
@@ -196,21 +181,18 @@ export class AiClient {
     });
   }
 
-  cancel(id: string): void {
-    this.worker?.postMessage({ type: 'cancel', id });
+  private rejectPending(error: Error): void {
+    for (const request of this.pending.values()) request.reject(error);
+    this.pending.clear();
+    for (const request of this.pendingEval.values()) request.reject(error);
+    this.pendingEval.clear();
   }
 
   cancelAll(): void {
-    for (const [id, request] of this.pending) {
-      this.worker?.postMessage({ type: 'cancel', id });
-      request.reject(new Error('搜索已取消'));
-    }
+    for (const request of this.pending.values()) request.reject(new Error('搜索已取消'));
     this.pending.clear();
 
-    for (const [id, request] of this.pendingEval) {
-      this.worker?.postMessage({ type: 'cancel', id });
-      request.reject(new Error('评估已取消'));
-    }
+    for (const request of this.pendingEval.values()) request.reject(new Error('评估已取消'));
     this.pendingEval.clear();
   }
 

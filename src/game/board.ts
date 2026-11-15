@@ -42,6 +42,21 @@ export function placeStone(board: BoardState, move: number, player: Player): Boa
   return next;
 }
 
+/**
+ * 原地落子 / 提子。
+ *
+ * `placeStone` 每次拷一整盘，适合应用层（不可变、好回滚）；搜索里每节点拷一份会直接把
+ * 分配量顶到不可用，所以走这一对。写盘面只允许经由这两个函数——将来加 Zobrist 时，
+ * 异或更新就挂在这里，不会漏。
+ */
+export function makeMove(board: BoardState, move: number, player: Player): void {
+  board[move] = player;
+}
+
+export function unmakeMove(board: BoardState, move: number): void {
+  board[move] = EMPTY;
+}
+
 export function checkWin(board: BoardState, move: number): Player | null {
   const player = board[move];
   if (player === EMPTY) return null;
@@ -181,6 +196,45 @@ export function legalMoves(board: BoardState, radius = 4): number[] {
   }
   return out;
 }
+
+/**
+ * 半径内的空点候选，顺序不保证。
+ *
+ * 与 `legalMoves` 的区别只有一个：不做按索引升序的还原。
+ * 搜索里候选马上要按威胁档重排，顺序没有意义，所以省掉那次全盘扫描与位提取。
+ * 结果写进调用方给的数组，避免每节点一次分配——但调用方要保证这个数组在递归期间
+ * 不被别的层覆盖（搜索里按层各备一份）。
+ */
+export function candidateCells(board: BoardState, radius: number, out: number[]): void {
+  const { table, stride } = neighborTable(Math.max(0, Math.floor(radius)));
+  out.length = 0;
+
+  markGeneration = (markGeneration + 1) & 0xffff;
+  if (markGeneration === 0) {
+    marks.fill(0);
+    markGeneration = 1;
+  }
+
+  let placed = false;
+  for (let move = 0; move < N_CELLS; move++) {
+    if (board[move] === EMPTY) continue;
+    placed = true;
+    const base = move * stride;
+    for (let i = 0; i < stride; i++) {
+      const neighbor = table[base + i];
+      if (neighbor < 0 || marks[neighbor] === markGeneration) continue;
+      marks[neighbor] = markGeneration;
+      if (board[neighbor] === EMPTY) out.push(neighbor);
+    }
+  }
+
+  // 空盘没有可依托的棋子，直接给天元
+  if (!placed) out.push(idx(7, 7));
+}
+
+/** 去重用的标记数组与代号；代号递增避免每次清零。 */
+const marks = new Uint16Array(N_CELLS);
+let markGeneration = 0;
 
 export function boardKey(board: BoardState, player: Player): string {
   let s = player === BLACK ? '1' : '2';

@@ -140,6 +140,7 @@ export function gradeOf(
   bestMove: number | null,
   loss: number | null,
   tags: readonly CoachVerdict[],
+  beforeValue: number | null = null,
 ): MoveGrade | null {
   if (tags.includes('missedWin') || tags.includes('missedBlockFive')) return 'blunder';
 
@@ -158,7 +159,14 @@ export function gradeOf(
     grade = 'good';
   }
 
-  if (tags.includes('missedBlockOpenThree') && (grade === 'good' || grade === 'inaccuracy')) {
+  // 估值饱和（已经必胜或必败）时 loss 恒为 0，失去区分力：这时规则标签不该再降级。
+  // 「反正都赢」的局面里说「你漏堵了」没有行动价值，还会和「评分没掉」自相矛盾。
+  const saturated = beforeValue !== null && (beforeValue >= 0.99 || beforeValue <= 0.01);
+  if (
+    !saturated &&
+    tags.includes('missedBlockOpenThree') &&
+    (grade === 'good' || grade === 'inaccuracy')
+  ) {
     grade = 'mistake';
   }
   return grade;
@@ -248,7 +256,7 @@ export function buildReviewedMoves(
       humanBefore: before.humanValue,
       humanAfter: after.humanValue,
       loss,
-      grade: graded ? gradeOf(item.move, before.bestMove, loss, tags) : null,
+      grade: graded ? gradeOf(item.move, before.bestMove, loss, tags, before.moverValue) : null,
       tags,
       bestMove: opening ? null : before.bestMove,
       top: opening ? null : before.top,

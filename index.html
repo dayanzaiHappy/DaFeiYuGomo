@@ -47,7 +47,7 @@
             </button>
             <button id="start-pvai" class="btn btn-secondary" type="button">
               <span>人 vs 机</span>
-              <small>v2 + MCTS</small>
+              <small>纯 JS 搜索</small>
             </button>
             <button id="home-import" class="btn btn-ghost" type="button">
               <span>导入对局</span>
@@ -140,6 +140,7 @@
             <span id="review-status" class="status-pill">未评估</span>
           </div>
           <div class="game-tools">
+            <button id="review-analyze" class="ghost-btn" type="button">分析</button>
             <button id="review-export" class="ghost-btn" type="button">导出 JSONL</button>
           </div>
         </header>
@@ -191,13 +192,91 @@
         </main>
       </section>
 
+      <section id="analysis-screen" class="screen analysis hidden" aria-label="分析板">
+        <header class="game-header">
+          <button id="analysis-back" class="ghost-btn back-btn" type="button">返回复盘</button>
+          <div class="game-meta">
+            <span id="analysis-title" class="game-mode">分析</span>
+            <span id="analysis-status" class="status-pill">未分析</span>
+          </div>
+          <div class="game-tools">
+            <button id="analysis-clear" class="ghost-btn" type="button">清空</button>
+          </div>
+        </header>
+
+        <main class="review-body">
+          <div class="board-wrap" id="analysis-board-wrap">
+            <div class="board-frame">
+              <canvas
+                id="analysis-canvas"
+                tabindex="0"
+                aria-label="分析棋盘，自由落子；方向键移动光标，回车落子"
+              ></canvas>
+            </div>
+          </div>
+
+          <aside class="review-panel analysis-panel">
+            <div class="eval-card">
+              <div class="eval-head">
+                <span>轮到 <b id="analysis-turn">黑方</b></span>
+                <span id="analysis-meta" class="eval-meta">未分析</span>
+              </div>
+              <div class="eval-bar">
+                <i id="analysis-eval-bar"></i>
+              </div>
+              <div class="eval-nums">
+                <span id="analysis-black">黑 —</span>
+                <span id="analysis-white">白 —</span>
+              </div>
+            </div>
+
+            <div class="analysis-block">
+              <h3 class="analysis-head">候补着法</h3>
+              <div id="analysis-top" class="analysis-top"></div>
+            </div>
+
+            <div class="analysis-block">
+              <h3 class="analysis-head">双方威胁</h3>
+              <table class="threat-table">
+                <thead>
+                  <tr>
+                    <th scope="col"></th>
+                    <th scope="col">活四</th>
+                    <th scope="col">冲四</th>
+                    <th scope="col">活三</th>
+                    <th scope="col">眠三</th>
+                  </tr>
+                </thead>
+                <tbody id="analysis-threats"></tbody>
+              </table>
+            </div>
+
+            <div class="analysis-controls">
+              <button id="analysis-undo" class="ghost-btn" type="button">悔棋</button>
+              <button id="analysis-redo" class="ghost-btn" type="button">重下</button>
+              <button id="analysis-flip" class="ghost-btn" type="button">换手</button>
+              <button id="analysis-reset" class="ghost-btn" type="button">回到起点</button>
+            </div>
+
+            <div class="review-actions">
+              <button id="analysis-deep" class="btn btn-primary" type="button">深入分析</button>
+              <button id="analysis-stop" class="btn btn-ghost hidden" type="button">停止</button>
+            </div>
+
+            <p class="side-note">
+              这里不记录、不评级，随便点。落子后自动出一版快速评估，「深入分析」用提示档重算。
+              评分为搜索评分，不是真实胜率。
+            </p>
+          </aside>
+        </main>
+      </section>
+
       <input
         id="import-file"
         type="file"
         accept=".jsonl,application/x-ndjson,application/json,text/plain"
         hidden
       />
-
       <div id="modal-root"></div>
       <div id="toast" class="toast hidden" role="status" aria-live="polite"></div>
     </div>

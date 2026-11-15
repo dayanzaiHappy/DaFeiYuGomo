@@ -1,4 +1,5 @@
-import { colOf, legalMoves, rowOf } from './board';
+import { legalMoves } from './board';
+import { WINDOWS } from './lines';
 import {
   DIRECTIONS,
   EMPTY,
@@ -21,78 +22,75 @@ export const TIER_OPEN_FOUR = 200;
 export const TIER_FOUR = 80;
 export const TIER_OPEN_THREE = 40;
 
-/** 强制集门槛：达到活四及以上的招式另加一份分值，让「必须应」的着法排到前面。 */
-export const PRIOR_BIAS_TAU = TIER_OPEN_FOUR;
+/**
+ * 每个格子、每个方向的 8 个邻居下标：前 4 个正向、后 4 个反向，越界为 -1。
+ *
+ * 形状检测在一次搜索里要被调用几十万次。原来每次都要算行列、判边界，除法和取模
+ * 占掉大半时间；展开成表之后只剩数组读，也不再分配临时对象。
+ */
+const STEPS = buildSteps();
 
-interface LineShape {
-  /** 落子后这一方向的连子长度。 */
-  total: number;
-  /** 连子两端的空位数，0~2。 */
-  openEnds: number;
+function buildSteps(): Int16Array {
+  const table = new Int16Array(N_CELLS * 4 * 8);
+  for (let move = 0; move < N_CELLS; move += 1) {
+    const row = Math.floor(move / SIZE);
+    const col = move % SIZE;
+    for (let dir = 0; dir < 4; dir += 1) {
+      const [dr, dc] = DIRECTIONS[dir];
+      const base = ((move << 2) | dir) << 3;
+      for (let step = 1; step <= 4; step += 1) {
+        const fr = row + dr * step;
+        const fc = col + dc * step;
+        table[base + step - 1] =
+          fr >= 0 && fr < SIZE && fc >= 0 && fc < SIZE ? fr * SIZE + fc : -1;
+        const br = row - dr * step;
+        const bc = col - dc * step;
+        table[base + 3 + step] =
+          br >= 0 && br < SIZE && bc >= 0 && bc < SIZE ? br * SIZE + bc : -1;
+      }
+    }
+  }
+  return table;
 }
 
 /**
- * 以 move 为中心、沿 (dr, dc) 的形状。
- * board[move] 必须是空点，按 player 已落子计算——这里只看邻居，不改盘面。
+ * 以 move 为中心、沿 dir 的连子形状，打包成 `连子长度 * 4 + 开放端数`。
+ *
+ * 长度在 ≥ 5 时饱和成 5：调用方只关心「够不够五」。
+ * 打包而不是返回对象——这个函数每节点调用几百次，对象分配会直接把 GC 压满。
+ * board[move] 必须是空点，按 player 已落子计算，这里只看邻居、不改盘面。
  */
-function lineShape(
-  board: BoardState,
-  move: number,
-  player: Player,
-  dr: number,
-  dc: number,
-): LineShape {
-  const row = rowOf(move);
-  const col = colOf(move);
+function lineRun(board: BoardState, move: number, player: Player, dir: number): number {
+  const base = ((move << 2) | dir) << 3;
 
   let forward = 0;
   while (forward < 4) {
-    const r = row + dr * (forward + 1);
-    const c = col + dc * (forward + 1);
-    if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) break;
-    if (board[r * SIZE + c] !== player) break;
-    forward++;
+    const cell = STEPS[base + forward];
+    if (cell < 0 || board[cell] !== player) break;
+    forward += 1;
   }
 
   let backward = 0;
   while (backward < 4) {
-    const r = row - dr * (backward + 1);
-    const c = col - dc * (backward + 1);
-    if (r < 0 || r >= SIZE || c < 0 || c >= SIZE) break;
-    if (board[r * SIZE + c] !== player) break;
-    backward++;
+    const cell = STEPS[base + 4 + backward];
+    if (cell < 0 || board[cell] !== player) break;
+    backward += 1;
   }
+
+  const total = forward + backward + 1;
+  if (total >= 5) return 5 << 2;
 
   let openEnds = 0;
-  const forwardRow = row + dr * (forward + 1);
-  const forwardCol = col + dc * (forward + 1);
-  if (
-    forwardRow >= 0 &&
-    forwardRow < SIZE &&
-    forwardCol >= 0 &&
-    forwardCol < SIZE &&
-    board[forwardRow * SIZE + forwardCol] === EMPTY
-  ) {
-    openEnds++;
-  }
-  const backwardRow = row - dr * (backward + 1);
-  const backwardCol = col - dc * (backward + 1);
-  if (
-    backwardRow >= 0 &&
-    backwardRow < SIZE &&
-    backwardCol >= 0 &&
-    backwardCol < SIZE &&
-    board[backwardRow * SIZE + backwardCol] === EMPTY
-  ) {
-    openEnds++;
-  }
-
-  return { total: forward + backward + 1, openEnds };
+  const head = STEPS[base + forward];
+  if (head >= 0 && board[head] === EMPTY) openEnds += 1;
+  const tail = STEPS[base + 4 + backward];
+  if (tail >= 0 && board[tail] === EMPTY) openEnds += 1;
+  return (total << 2) | openEnds;
 }
 
 function winsAt(board: BoardState, move: number, player: Player): boolean {
-  for (const [dr, dc] of DIRECTIONS) {
-    if (lineShape(board, move, player, dr, dc).total >= 5) return true;
+  for (let dir = 0; dir < 4; dir += 1) {
+    if (lineRun(board, move, player, dir) >> 2 >= 5) return true;
   }
   return false;
 }
@@ -105,7 +103,9 @@ function winsAt(board: BoardState, move: number, player: Player): boolean {
  */
 export function immediateWins(board: BoardState, player: Player): number[] {
   const out: number[] = [];
-  for (const move of legalMoves(board, 1)) {
+  const candidates = legalMoves(board, 1);
+  for (let i = 0; i < candidates.length; i += 1) {
+    const move = candidates[i];
     if (board[move] !== EMPTY) continue;
     if (winsAt(board, move, player)) out.push(move);
   }
@@ -117,15 +117,15 @@ export function immediateWins(board: BoardState, player: Player): number[] {
  *
  * 活四两端都能成五，挡不住，所以这类点是必须考虑防守的。
  * 它和成五点不同：这里只是「对方有这个威胁」，不是「对方已经能成五」，
- * 所以不进 resolveForced 的胜负判定，只用来保证候选里有它。
+ * 练习时用来判断「这手是不是漏了活三」，搜索里不单独处理。
  */
 export function openFourPoints(board: BoardState, player: Player): number[] {
   const out: number[] = [];
   for (const move of legalMoves(board, 2)) {
     if (board[move] !== EMPTY) continue;
-    for (const [dr, dc] of DIRECTIONS) {
-      const shape = lineShape(board, move, player, dr, dc);
-      if (shape.total === 4 && shape.openEnds === 2) {
+    for (let dir = 0; dir < 4; dir += 1) {
+      const packed = lineRun(board, move, player, dir);
+      if (packed >> 2 === 4 && (packed & 3) === 2) {
         out.push(move);
         break;
       }
@@ -135,140 +135,36 @@ export function openFourPoints(board: BoardState, player: Player): number[] {
 }
 
 /**
- * 是否存在活四威胁。与 openFourPoints 同义，但找到第一个就返回。
- * 叶节点每次模拟都要问两次，走这条短路版本。
- */
-export function hasOpenFourThreat(board: BoardState, player: Player): boolean {
-  for (const move of legalMoves(board, 2)) {
-    if (board[move] !== EMPTY) continue;
-    for (const [dr, dc] of DIRECTIONS) {
-      const shape = lineShape(board, move, player, dr, dc);
-      if (shape.total === 4 && shape.openEnds === 2) return true;
-    }
-  }
-  return false;
-}
-
-/**
  * 某一方落子后这一方向的档位分。
  * 只看「这手造出了什么」：五连 / 活四 / 冲四 / 活三，其余为 0。
  */
-function shapeTier(
-  board: BoardState,
-  move: number,
-  player: Player,
-  dr: number,
-  dc: number,
-): number {
-  const shape = lineShape(board, move, player, dr, dc);
-  if (shape.total >= 5) return TIER_WIN;
-  if (shape.total === 4 && shape.openEnds === 2) return TIER_OPEN_FOUR;
-  if (shape.total === 4 && shape.openEnds === 1) return TIER_FOUR;
-  if (shape.total === 3 && shape.openEnds === 2) return TIER_OPEN_THREE;
+export function directionTier(board: BoardState, move: number, player: Player, dir: number): number {
+  const packed = lineRun(board, move, player, dir);
+  const total = packed >> 2;
+  if (total >= 5) return TIER_WIN;
+  const openEnds = packed & 3;
+  if (total === 4) {
+    if (openEnds === 2) return TIER_OPEN_FOUR;
+    if (openEnds === 1) return TIER_FOUR;
+    return 0;
+  }
+  if (total === 3 && openEnds === 2) return TIER_OPEN_THREE;
   return 0;
 }
 
 /**
- * 招式分档分：攻（我这手造什么）与防（我这手堵掉对方什么）读同一张表，取较大者。
+ * 这一手能为 player 造出的最高档位（只看进攻，不看防守）。
  *
- * 防守不需要单独发明权重——「堵掉对方的活三」和「自己造活三」一样值 40，
- * 因为两者都改变同一个威胁。
+ * 静态战术搜索只关心「这手能不能造四」；排序要的是「攻防取大」，
+ * 由 `generate` 把两个方向的档位各取一次再取大，不在这里合并。
  */
-export function threatScore(board: BoardState, move: number, player: Player): number {
+export function attackTier(board: BoardState, move: number, player: Player): number {
   let best = 0;
-  for (const [dr, dc] of DIRECTIONS) {
-    const attack = shapeTier(board, move, player, dr, dc);
-    if (attack > best) best = attack;
-    const defend = shapeTier(board, move, other(player), dr, dc);
-    if (defend > best) best = defend;
+  for (let dir = 0; dir < 4; dir += 1) {
+    const tier = directionTier(board, move, player, dir);
+    if (tier > best) best = tier;
   }
   return best;
-}
-
-/**
- * 必须进候选的点：我能成五的点 + 对方能成五、我必须挡的点 + 对方活三的延伸点。
- *
- * 先验只回答「像人一样哪儿好」，不回答「哪儿必胜/必败」。
- * 候选截断如果不并上这组点，会裁掉唯一能赢或唯一能挡的着法，而且极难复现。
- *
- * 活三那组只保证「上场」：堵哪一头、要不要先走自己的进攻，都交给搜索判断。
- * 一旦像成五点那样强制，就会出现「自己有四可以赢，却被逼着去堵活三」。
- *
- * VCF 首着不在这里：根节点会先用 vcf() 做一次快检，命中就直接返回胜手，
- * 未命中说明不存在这样的首着，再并进来只是重复搜索。
- */
-export function forcedMoves(board: BoardState, player: Player): number[] {
-  const picked = new Set<number>();
-  for (const move of immediateWins(board, player)) picked.add(move);
-  for (const move of immediateWins(board, other(player))) picked.add(move);
-  for (const move of openFourPoints(board, other(player))) picked.add(move);
-  return [...picked].sort((a, b) => a - b);
-}
-
-export interface ForcedOutcome {
-  /** 轮到我（传入的 player）时的胜率：1 我胜，0 我负。 */
-  win: number;
-}
-
-/**
- * 强制线路解析（MCTS-Solver 的最小版本）。
- *
- * 只沿「唯一应手」走，因此每一步都是确定的：
- *   1. 我能成五            → 我胜
- *   2. 对方有 ≥2 个成五点  → 挡不住，我负
- *   3. 对方恰好 1 个成五点 → 只能挡，挡完交换视角继续
- *   4. 其他                → 未解析，交回神经网络估值
- *
- * 不做全宽搜索，所以不会误判；代价是只能证明强制线，判不出来就返回 null。
- * 返回「轮到我的胜率」而不是写 node.winner：winner 的语义是「盘面上已经有人连成五」，
- * 两者混用会让 select() 的终局判断变得含糊。
- */
-export function resolveForced(
-  board: BoardState,
-  player: Player,
-  maxPlies: number,
-): ForcedOutcome | null {
-  if (maxPlies <= 0) return null;
-  const win = solveForced(board, player, maxPlies);
-  return win === null ? null : { win };
-}
-
-function solveForced(board: BoardState, player: Player, plies: number): number | null {
-  if (immediateWins(board, player).length > 0) return 1;
-
-  const threats = immediateWins(board, other(player));
-  if (threats.length >= 2) return 0;
-  if (threats.length === 0) return null;
-  if (plies <= 0) return null;
-
-  const block = threats[0];
-  board[block] = player;
-  const next = solveForced(board, other(player), plies - 1);
-  board[block] = EMPTY;
-
-  if (next === null) return null;
-  // next 是对手视角的胜率，翻回来才是我这一层的
-  return 1 - next;
-}
-
-/** 所有五格窗口（4 个方向 × 全部起点），扁平存放，每 5 个一组。 */
-const WINDOWS = buildWindows();
-
-function buildWindows(): Int16Array {
-  const cells: number[] = [];
-  for (const [dr, dc] of DIRECTIONS) {
-    for (let row = 0; row < SIZE; row++) {
-      for (let col = 0; col < SIZE; col++) {
-        const endRow = row + dr * 4;
-        const endCol = col + dc * 4;
-        if (endRow < 0 || endRow >= SIZE || endCol < 0 || endCol >= SIZE) continue;
-        for (let step = 0; step < 5; step++) {
-          cells.push((row + dr * step) * SIZE + col + dc * step);
-        }
-      }
-    }
-  }
-  return Int16Array.from(cells);
 }
 
 /**
@@ -276,6 +172,7 @@ function buildWindows(): Int16Array {
  *
  * 用窗口枚举而不是「试落每一手再看有没有成五点」：窗口总数固定 572 个，
  * 与局面无关；后者要为每个空点跑一次成五点检测，在 VCF 里是立方级的浪费。
+ * 窗口表在 lines.ts 里构建，与评估共用同一份，避免两处对「五格」有不同理解。
  */
 function fourCandidates(board: BoardState, player: Player): number[] {
   const seen = new Uint8Array(N_CELLS);

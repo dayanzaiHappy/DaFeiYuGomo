@@ -25,7 +25,7 @@ Node 与 npm，不需要全局安装任何工具。唯一运行时依赖是 `onn
 ## 目录
 
 ```text
-src/game/      棋盘规则、MCTS、战术、提示逻辑、缓存
+src/game/      棋盘规则、alpha-beta 搜索、评估、战术、提示逻辑、缓存
 src/content/   气泡台词（唯一文案源）
 src/ai/        Worker 与 ONNX Runtime 推理
 src/render/    Canvas 棋盘、DPR 适配、皮肤
