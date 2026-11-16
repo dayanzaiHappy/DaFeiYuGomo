@@ -9,6 +9,10 @@ export interface ReadyInfo {
   modelBytes: number;
   /** ONNX 字节的 SHA-256，形如 `sha256:...`；写进对局记录用于说明模型来源。 */
   modelHash: string;
+  /** 叶子权重的 SHA-256；没加载成功时为 null（此时这一局跑的是手写评估）。 */
+  leafHash: string | null;
+  /** 实际生效的 λ，权重缺失时为 0。 */
+  evalLambda: number;
 }
 
 export interface EvaluationResult {

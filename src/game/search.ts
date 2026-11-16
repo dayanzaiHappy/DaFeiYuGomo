@@ -2,6 +2,7 @@ import type { AbProfile } from './ai-config';
 import { candidateCells, makeMove, unmakeMove } from './board';
 import { SCORE_WIN, toWinRate } from './eval';
 import { EvalCache } from './eval-cache';
+import { OldEvaluator, type LeafEvaluator } from './leaf/evaluator';
 import { TIER_FOUR, TIER_WIN, vcf } from './tactics';
 import { ThreatCache } from './threat-cache';
 import { N_CELLS, other, type BoardState, type Player } from './types';
@@ -96,6 +97,11 @@ export interface AbSearchOptions extends AbProfile {
    * 退回按格号排序，与旧行为一致。
    */
   rootPrior?: ArrayLike<number> | null;
+  /**
+   * 叶子评估工厂。搜索自己造 `EvalCache`，所以只能把「怎么拿评估器」交给调用方；
+   * 缺省即纯旧评估。worker 在这里注入混合评估，测试不传，两边走不同的实现。
+   */
+  leafFactory?: ((cache: EvalCache) => LeafEvaluator) | null;
 }
 
 export interface AbResult {
@@ -117,6 +123,8 @@ interface SearchState {
   board: BoardState;
   cache: ThreatCache;
   evalCache: EvalCache;
+  /** 叶子评估；缺省是纯旧评估，λ=0 时与 2.0.0 走同一条路径。 */
+  leaf: LeafEvaluator;
   nodes: number;
   limit: number;
   aborted: boolean;
@@ -338,7 +346,7 @@ function quiescence(
   left: number,
 ): number {
   if (tick(state)) return 0;
-  if (ply >= MAX_PLY) return state.evalCache.score(side);
+  if (ply >= MAX_PLY) return state.leaf.score(side);
 
   const board = state.board;
   const rival = other(side);
@@ -363,13 +371,13 @@ function quiescence(
     place(state, block, side);
     const score =
       left <= 0
-        ? -state.evalCache.score(rival)
+        ? -state.leaf.score(rival)
         : -quiescence(state, rival, -beta, -alpha, ply + 1, left - 1);
     lift(state, block, side);
     return score;
   }
 
-  const stand = state.evalCache.score(side);
+  const stand = state.leaf.score(side);
   if (left <= 0) return stand;
   if (stand >= beta) return stand;
   if (stand > alpha) alpha = stand;
@@ -400,7 +408,7 @@ function negamax(
   ply: number,
 ): number {
   if (tick(state)) return 0;
-  if (ply >= MAX_PLY) return state.evalCache.score(side);
+  if (ply >= MAX_PLY) return state.leaf.score(side);
   if (depth <= 0) return quiescence(state, side, alpha, beta, ply, state.qDepth);
 
   const hit = probe(state, depth, alpha, beta, ply);
@@ -494,10 +502,12 @@ function pickMove(top: readonly RootMove[], options: AbSearchOptions, random: ()
 
 export function searchAb(board: BoardState, side: Player, options: AbSearchOptions): AbResult {
   const random = options.random ?? Math.random;
+  const evalCache = new EvalCache();
   const state: SearchState = {
     board: new Uint8Array(board),
     cache: new ThreatCache(),
-    evalCache: new EvalCache(),
+    evalCache,
+    leaf: options.leafFactory ? options.leafFactory(evalCache) : new OldEvaluator(evalCache),
     nodes: 0,
     limit: Math.max(1, Math.floor(options.nodes)),
     aborted: false,

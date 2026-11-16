@@ -1,9 +1,12 @@
 /// <reference lib="webworker" />
 
 import type { InferenceSession } from 'onnxruntime-web';
-import type { AbProfile } from '../game/ai-config';
+import { EVAL_CONFIG, type AbProfile } from '../game/ai-config';
 import { searchAb } from '../game/search';
 import { toWinRate } from '../game/eval';
+import type { EvalCache } from '../game/eval-cache';
+import { createLeafEvaluator, type LeafEvaluator, type LeafNet } from '../game/leaf/evaluator';
+import { decodeLeafModel } from '../game/leaf/net';
 import { sha256Hex } from '../game/sha256';
 import type { Player, SearchResult } from '../game/types';
 import { N_CELLS } from '../game/types';
@@ -44,6 +47,10 @@ type ReadyMessage = {
   modelBytes: number;
   /** ONNX 字节的 SHA-256；记录对局时写进 header，证明复盘对应哪个模型。 */
   modelHash: string;
+  /** 叶子权重的 SHA-256；没加载成功时为 null。 */
+  leafHash: string | null;
+  /** 实际生效的 λ。权重缺失或校验失败时回落到 0，记录里写这个值而不是配置值。 */
+  evalLambda: number;
 };
 
 type WorkerMessage =
@@ -94,6 +101,46 @@ let evaluator: OrtEvaluator | null = null;
 let readyInfo: ReadyMessage | null = null;
 let initPromise: Promise<ReadyMessage> | null = null;
 let searchChain: Promise<void> = Promise.resolve();
+
+/** 叶子网；=null 表示没加载成功，搜索退回纯旧评估。 */
+let leafNet: LeafNet | null = null;
+let leafHashValue: string | null = null;
+
+/**
+ * 下载 + 校验叶子权重。失败一律退回 null，绝不让搜索起不来：
+ * 权重是几 KB 的静态资源，网络抖动或缓存投毒都不该变成「AI 不能用」。
+ */
+async function loadLeafNet(): Promise<void> {
+  const url = EVAL_CONFIG.modelUrl;
+  if (!url || !(EVAL_CONFIG.lambda > 0)) return;
+  try {
+    const response = await fetch(url, { cache: 'force-cache' });
+    if (!response.ok) throw new Error(`权重下载失败 ${response.status}`);
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    const hash = `sha256:${sha256Hex(bytes)}`;
+    if (EVAL_CONFIG.hash !== null && hash !== EVAL_CONFIG.hash) {
+      throw new Error('权重与配置里的 hash 不符');
+    }
+    leafNet = decodeLeafModel(bytes);
+    leafHashValue = hash;
+  } catch (error) {
+    console.warn('叶子评估权重加载失败，退回手写评估', error);
+    leafNet = null;
+    leafHashValue = null;
+  }
+}
+
+/** 实际生效的 λ：权重没到位时就是 0。记录里要写这个，不是配置里的那个。 */
+function effectiveLambda(): number {
+  return leafNet ? EVAL_CONFIG.lambda : 0;
+}
+
+/**
+ * 叶子评估工厂。2.1.0 起加载 int16 权重走混合评估；权重缺失时 `createLeafEvaluator`
+ * 自己会退回 `OldEvaluator`，所以这里不需要再判一次。
+ */
+const leafFactory = (cache: EvalCache): LeafEvaluator =>
+  createLeafEvaluator(cache, leafNet, EVAL_CONFIG);
 
 function numThreads(): number {
   // GitHub Pages 无法提供 COOP/COEP，ORT 多线程不可用；固定单线程最稳。
@@ -219,6 +266,8 @@ async function init(message: InitMessage): Promise<ReadyMessage> {
 
     ort = best.module;
     evaluator = new OrtEvaluator(best.session);
+    // 叶子权重是纯 TS 的 int16 前向，不经 ORT；放在 ORT 之后加载，失败也不影响对局
+    await loadLeafNet();
     readyInfo = {
       type: 'ready',
       backend: best.backend,
@@ -228,6 +277,8 @@ async function init(message: InitMessage): Promise<ReadyMessage> {
       modelBytes: modelData.byteLength,
       // 模型字节已经在手里，顺手算一次；记录里靠它说明「这份复盘对应哪个模型」
       modelHash: `sha256:${sha256Hex(modelData)}`,
+      leafHash: leafHashValue,
+      evalLambda: effectiveLambda(),
     };
     return readyInfo;
   })();
@@ -268,6 +319,7 @@ async function startSearch(message: SearchMessage): Promise<void> {
       noise: message.ab.noise,
       bias: message.ab.bias,
       rootPrior: prior,
+      leafFactory,
     });
     post({
       type: 'result',

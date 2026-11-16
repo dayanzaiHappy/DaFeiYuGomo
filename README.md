@@ -1,6 +1,6 @@
 # DaFeiYuGomo
 
-五子棋网页版，从桌面版五子棋项目移植。棋盘 15×15，五连即胜；Bot 用纯 TypeScript 的 alpha-beta 搜索，神经网络只参与根节点排序与开局应手。
+五子棋网页版，从桌面版五子棋项目移植。棋盘 15×15，五连即胜；Bot 用纯 TypeScript 的 alpha-beta 搜索，叶节点估值来自一个蒸馏训练的小型神经网络，权重随包下发。
 
 在线地址：<https://dayanzaihappy.github.io/DaFeiYuGomo/>
 

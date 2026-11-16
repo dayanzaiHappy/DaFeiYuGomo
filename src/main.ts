@@ -1156,10 +1156,13 @@ function exportReview(): void {
   const controller = review;
   if (!controller) return;
 
+  // 写实际生效的值，不是配置值：权重没加载成功时这一局跑的是手写评估
   const text = controller.exportRecord({
     appVersion: __APP_VERSION__,
     modelVersion: AI_CONFIG.modelVersion,
     modelHash: readyInfo?.modelHash ?? null,
+    leafHash: readyInfo?.leafHash ?? null,
+    lambda: readyInfo?.evalLambda ?? 0,
   });
   const now = new Date();
   const pad = (value: number) => String(value).padStart(2, '0');

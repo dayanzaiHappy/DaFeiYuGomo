@@ -98,3 +98,44 @@ export const AI_CONFIG = {
   modelVersion: 'v2-b6c96-fp32',
   modelUrl: 'models/model-v2.onnx',
 } as const;
+
+/**
+ * 叶子评估的配置（2.1.0 的混合评估）。
+ *
+ * 默认 λ=0：混合评估在 λ=0 时原样返回旧评估分，搜索路径与 2.0.0 逐位一致。
+ * 标定出来的 λ* 在等节点对局验证过之后才改这里，并且分档可不同——
+ * 「弱档偏旧、强档偏新」是对局结论，不是可以假设的方向。
+ */
+export interface EvalConfig {
+  /**
+   * 旧评估分换 logit 的尺度：`u_o = 2·s_o / K`。
+   *
+   * 这是**旧评估专属**的标定常数，回答「多少分算一个 logit」，由标定集拟合得到。
+   * 它不决定输出的分数刻度——刻度固定是 `WIN_RATE_SCALE`，因为 noise、MOVE_MARGIN、
+   * GRADE_LOSS、SCORE_CLAMP 全都按那个刻度写。详见 `leaf/blend.ts` 的 `scoreFromLogit`。
+   */
+  K: number;
+  /** 先后手偏置：黑先 +1、白先 −1。空盘旧评估给 0，缺的就是这一项（标定值 0.15）。 */
+  b: number;
+  /** 对新评估的信任度，0 表示完全不用网络。 */
+  lambda: number;
+  /** 叶子权重路径；null 表示不带网络，全部走旧评估。 */
+  modelUrl: string | null;
+  /** 权重的 SHA-256，与 modelUrl 一起下发，写进对局记录。 */
+  hash: string | null;
+}
+
+export const EVAL_CONFIG: EvalConfig = {
+  /** 标定集上拟合出的旧评估尺度，取整到 5000。 */
+  K: 5000,
+  /** 标定出的先后手偏置：黑先 +0.15 logit ≈ 53.7%，与 freestyle 黑的基率优势同向。 */
+  b: 0.15,
+  /**
+   * 1 = 全用叶子网。标定给出 λ\*=1.0，与「网络特征包含旧评估全部信息」一致：
+   * 网络的 30 维里就有双方六种形状计数与位置分，旧评估在这之上加不出新信号。
+   */
+  lambda: 1,
+  modelUrl: 'models/leaf-v1.bin',
+  /** 权重字节的 SHA-256。加载时比对，不符则按 λ=0 跑——宁可退回旧评估也不要跑半份权重。 */
+  hash: 'sha256:8abc4322c38cfb059b820b3eaac35730ba96c7a61b46ca8fda7b673218270da7',
+};

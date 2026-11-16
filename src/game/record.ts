@@ -22,6 +22,12 @@ export interface RecordHeaderInput {
   modelVersion: string;
   /** ONNX 字节的 SHA-256；加载失败或未提供时为 null。 */
   modelHash: string | null;
+  /** 叶子评估标识：不带网络时是 `hand-2.0.0`，带网络时是 `leaf-<hash 前 12 位>`。 */
+  evalVersion: string;
+  /** 叶子权重的 SHA-256；未加载权重时为 null。 */
+  leafHash: string | null;
+  /** 当次搜索用的 λ。2.0.1 起写入，λ=0 表示完全走旧评估。 */
+  lambda: number;
   /** 复盘预算，形如 `8/360000/24/14/6/9`；说明这份评级是在哪一档下算的。 */
   reviewProfile?: string;
   humanColor: Player;
@@ -30,11 +36,41 @@ export interface RecordHeaderInput {
   createdAt: string;
 }
 
-export interface RecordHeader extends RecordHeaderInput {
+/**
+ * 三项评估字段是 2.0.1 才加的，更早的记录里没有。
+ * 类型上标成可选，解析时不做默认值注入——注入会改变 canonicalJson，
+ * 校验 hash 时就会误判「记录被改过」。
+ */
+export interface RecordHeader extends Omit<RecordHeaderInput, 'evalVersion' | 'leafHash' | 'lambda'> {
   type: 'header';
   schemaVersion: number;
   boardSize: number;
   rules: 'freestyle';
+  evalVersion?: string;
+  leafHash?: string | null;
+  lambda?: number;
+}
+
+/** 没有这几项的记录一律按 2.0.0 的手写评估、λ=0 解释。 */
+export const LEGACY_EVAL_VERSION = 'hand-2.0.0';
+
+export function headerEvalVersion(header: RecordHeader): string {
+  return header.evalVersion ?? LEGACY_EVAL_VERSION;
+}
+
+export function headerLeafHash(header: RecordHeader): string | null {
+  return header.leafHash ?? null;
+}
+
+export function headerLambda(header: RecordHeader): number {
+  return header.lambda ?? 0;
+}
+
+/** 记录里显示用的评估标识：没带叶子权重时就是手写评估。 */
+export function evalVersionLabel(leafHash: string | null): string {
+  if (!leafHash) return LEGACY_EVAL_VERSION;
+  const hex = leafHash.startsWith('sha256:') ? leafHash.slice(7) : leafHash;
+  return `leaf-${hex.slice(0, 12)}`;
 }
 
 export interface RecordMove {
@@ -105,6 +141,9 @@ export function buildHeader(input: RecordHeaderInput): RecordHeader {
     engineVersion: input.engineVersion,
     modelVersion: input.modelVersion,
     modelHash: input.modelHash,
+    evalVersion: input.evalVersion,
+    leafHash: input.leafHash,
+    lambda: input.lambda,
     ...(input.reviewProfile ? { reviewProfile: input.reviewProfile } : {}),
     boardSize: SIZE,
     rules: 'freestyle',
@@ -206,6 +245,16 @@ function assertHeader(value: unknown): RecordHeader {
   if (typeof value.modelVersion !== 'string') throw new Error('modelVersion 缺失');
   if (value.modelHash !== null && typeof value.modelHash !== 'string') {
     throw new Error('modelHash 必须为字符串或 null');
+  }
+  // 2.0.1 起写入；旧记录没有，缺失不算错
+  if (value.evalVersion !== undefined && typeof value.evalVersion !== 'string') {
+    throw new Error('evalVersion 必须为字符串');
+  }
+  if (value.leafHash !== undefined && value.leafHash !== null && typeof value.leafHash !== 'string') {
+    throw new Error('leafHash 必须为字符串或 null');
+  }
+  if (value.lambda !== undefined && (typeof value.lambda !== 'number' || !Number.isFinite(value.lambda))) {
+    throw new Error('lambda 必须为有限数');
   }
   if (value.reviewProfile !== undefined && typeof value.reviewProfile !== 'string') {
     throw new Error('reviewProfile 必须为字符串');

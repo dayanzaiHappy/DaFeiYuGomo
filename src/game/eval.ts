@@ -37,18 +37,20 @@ export function toWinRate(score: number): number {
   return 0.5 + 0.5 * Math.tanh(score / WIN_RATE_SCALE);
 }
 
-const SCORE_OPEN_FOUR = 6000;
-const SCORE_DOUBLE_THREE = 3500;
-const SCORE_FOUR = 1200;
-const SCORE_OPEN_THREE = 400;
+// 以下权重与形状槽位导出给叶子特征层复用：byDir 的「威胁形状分」必须与这里的口径一致，
+// 两处各写一份迟早写岔。
+export const SCORE_OPEN_FOUR = 6000;
+export const SCORE_DOUBLE_THREE = 3500;
+export const SCORE_FOUR = 1200;
+export const SCORE_OPEN_THREE = 400;
 /**
  * 眠三：一端被堵的三，下一手能造出冲四，但不成活四。
  *
  * 1.4.x 及以前完全不计，等于把「我方还有一个四可以冲」当成零；
  * 取一个活三的三成：它确实是一手强制威胁，但对方有整整一手棋可以处理。
  */
-const SCORE_SLEEP_THREE = 120;
-const SCORE_OPEN_TWO = 40;
+export const SCORE_SLEEP_THREE = 120;
+export const SCORE_OPEN_TWO = 40;
 
 /**
  * 每种颜色占 6 个槽位：成五 / 活四 / 冲四 / 活三 / 眠三 / 活二。
@@ -58,12 +60,13 @@ const SCORE_OPEN_TWO = 40;
  */
 export const SHAPE_SLOTS = 6;
 
-const SHAPE_FIVE = 0;
-const SHAPE_OPEN_FOUR = 1;
-const SHAPE_FOUR = 2;
-const SHAPE_OPEN_THREE = 3;
-const SHAPE_SLEEP_THREE = 4;
-const SHAPE_OPEN_TWO = 5;
+/** 形状槽位：计数数组 `颜色 * 6 + 形状` 的形状段下标，特征层按同一布局读取。 */
+export const SHAPE_FIVE = 0;
+export const SHAPE_OPEN_FOUR = 1;
+export const SHAPE_FOUR = 2;
+export const SHAPE_OPEN_THREE = 3;
+export const SHAPE_SLEEP_THREE = 4;
+export const SHAPE_OPEN_TWO = 5;
 
 /** 全量评估用的两块临时表；评估同步且不重入，一份够用。 */
 const lineScratch = new Int32Array(SHAPE_SLOTS * 2);

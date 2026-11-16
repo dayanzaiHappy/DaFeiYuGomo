@@ -5,7 +5,7 @@ import {
   isAiDifficulty,
   type AiDifficulty,
 } from '../game/ai-config';
-import { buildRecord, type ParsedRecord } from '../game/record';
+import { buildRecord, evalVersionLabel, type ParsedRecord } from '../game/record';
 import {
   OPENING_PLIES,
   buildReviewPoints,
@@ -270,6 +270,8 @@ export class ReviewController {
     appVersion: string;
     modelVersion: string;
     modelHash: string | null;
+    leafHash: string | null;
+    lambda: number;
   }): string {
     const built = buildRecord(
       {
@@ -277,6 +279,10 @@ export class ReviewController {
         engineVersion: AI_CONFIG.engineVersion,
         modelVersion: options.modelVersion,
         modelHash: options.modelHash,
+        // 评估架构与权重在 2.0.1 起写进记录：没有它们，同一局重跑出不同评级就说不清为什么
+        evalVersion: evalVersionLabel(options.leafHash),
+        leafHash: options.leafHash,
+        lambda: options.lambda,
         // 复盘预算写全六个参数：depth/nodes/根宽/内宽/qDepth/vcfDepth
         reviewProfile: [
           REVIEW_PROFILE.depth,
