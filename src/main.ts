@@ -1026,7 +1026,7 @@ function openReview(): void {
   reviewOrigin = 'game';
 
   showScreen('review');
-  reviewView.open(review, readyInfo?.evalMs ?? 0);
+  reviewView.open(review);
   // 简易评估是秒级的，进来先跑一遍；用户想深评再点按钮
   void runReview('fast');
 }
@@ -1039,7 +1039,7 @@ async function runReview(mode: ReviewMode): Promise<void> {
     return;
   }
   if (mode === 'fast' && controller.mode === 'deep') {
-    const ok = window.confirm('简易评估会用网络值覆盖当前的深度结果，继续吗？');
+    const ok = window.confirm('简易评估会用快速搜索的值覆盖当前的深度结果，继续吗？');
     if (!ok) return;
   }
 
@@ -1048,7 +1048,6 @@ async function runReview(mode: ReviewMode): Promise<void> {
     const client = aiClient;
     if (!client) throw new Error('AI 引擎不可用');
     if (review !== controller) return;
-    reviewView.setEvalMs(readyInfo?.evalMs ?? 0);
     await controller.run(mode, client, () => {
       if (review === controller) reviewView.refresh();
     });
@@ -1087,7 +1086,7 @@ async function importReview(file: File): Promise<void> {
     review = controller;
     reviewOrigin = 'home';
     showScreen('review');
-    reviewView.open(controller, readyInfo?.evalMs ?? 0);
+    reviewView.open(controller);
     showToast('已导入对局', 1500);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

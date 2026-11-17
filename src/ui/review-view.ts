@@ -103,7 +103,6 @@ export class ReviewView {
   private playing = false;
   private timer = 0;
   private speed = 1;
-  private evalMs = 45;
   private rows: RowRefs[] = [];
   /** 「正确着法」预览：把 from 收回、to 落下；只改渲染，不改 controller。 */
   private correction: { from: number; to: number; player: Player } | null = null;
@@ -160,12 +159,11 @@ export class ReviewView {
     document.addEventListener('keydown', this.onKeyDown);
   }
 
-  open(controller: ReviewController, evalMs: number): void {
+  open(controller: ReviewController): void {
     this.pause();
     this.controller?.dispose();
     this.clearCorrection();
     this.controller = controller;
-    this.evalMs = evalMs > 0 ? evalMs : 45;
     this.index = controller.total;
     this.viewSide = 'human';
     this.hoverIndex = null;
@@ -193,12 +191,6 @@ export class ReviewView {
     this.listEl.innerHTML = '';
     this.hoverIndex = null;
     this.hideTooltip();
-  }
-
-  /** 模型就绪后更新单次推理耗时，用于深评 ETA。 */
-  setEvalMs(evalMs: number): void {
-    if (evalMs > 0) this.evalMs = evalMs;
-    if (this.controller) this.renderStatus();
   }
 
   resize(): void {
@@ -273,7 +265,7 @@ export class ReviewView {
       this.progressEl.classList.add('hidden');
       this.statusEl.className = 'status-pill';
       this.statusEl.textContent =
-        controller.mode === 'deep' ? '导入 · 深度搜索' : '导入 · 网络估值';
+        controller.mode === 'deep' ? '导入 · 深度搜索' : '导入 · 快速搜索';
       return;
     }
 
@@ -283,7 +275,7 @@ export class ReviewView {
       return;
     }
     if (controller.busy) {
-      const eta = controller.done >= total ? '' : ` · ${duration(controller.remainingSeconds(this.evalMs))}`;
+      const eta = controller.done >= total ? '' : ` · ${duration(controller.remainingSeconds())}`;
       this.statusEl.textContent = `深评 ${controller.done}/${total}${eta}`;
       this.statusEl.className = 'status-pill thinking';
       return;
@@ -292,7 +284,7 @@ export class ReviewView {
     if (controller.mode === null) {
       this.statusEl.textContent = '未评估';
     } else if (controller.done >= total) {
-      this.statusEl.textContent = controller.mode === 'deep' ? '深度搜索' : '网络估值';
+      this.statusEl.textContent = controller.mode === 'deep' ? '深度搜索' : '快速搜索';
     } else {
       this.statusEl.textContent = `已停止 ${controller.done}/${total}`;
     }

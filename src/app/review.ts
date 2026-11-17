@@ -1,8 +1,10 @@
 import type { AiClient } from '../ai/client';
 import {
+  AB_PROFILES,
   AI_CONFIG,
   REVIEW_PROFILE,
   isAiDifficulty,
+  type AbProfile,
   type AiDifficulty,
 } from '../game/ai-config';
 import { buildRecord, evalVersionLabel, type ParsedRecord } from '../game/record';
@@ -37,6 +39,17 @@ export interface ReviewSnapshot {
 }
 
 export type ReviewMode = 'fast' | 'deep';
+
+/**
+ * 简易评估的搜索预算：normal 档去掉噪声，不另立档位。
+ *
+ * 曾经是一次 v2 价值前向——它的 value 标签来自自对弈终局回传，开局段
+ * 系统性偏向「黑必胜」，和深评在同一点上能给出一百对五十的矛盾值。
+ * 改成与深评同一条搜索通道的小预算版：开局自然贴着基率，浅深度里
+ * 能看见的强制线也不会漏。noise 必须为 0，同一条曲线才可复现、
+ * 相邻两手才有可比性。
+ */
+const FAST_PROFILE: AbProfile = { ...AB_PROFILES.normal, noise: 0 };
 
 export interface ReviewProgress {
   mode: ReviewMode;
@@ -180,15 +193,13 @@ export class ReviewController {
   }
 
   /**
-   * 深评剩余时间的粗估。
-   *
-   * 简易评估是一次前向，直接按实测毫秒乘；深评的主体是节点数，与前向无关，
-   * 按本机实测吞吐粗算（95k~130k 节点/秒，取 100k 做分母）。
+   * 剩余时间的粗估：两条通道都是搜索，主体都是节点数，按实测吞吐取整
+   * 到分母（见 `/ 100_000`）。
    */
-  remainingSeconds(evalMs: number): number {
+  remainingSeconds(): number {
     const left = Math.max(0, this.total - this.done);
-    if (this.mode !== 'deep') return (left * evalMs) / 1000;
-    return (left * REVIEW_PROFILE.nodes) / 100_000;
+    const nodes = this.mode === 'deep' ? REVIEW_PROFILE.nodes : FAST_PROFILE.nodes;
+    return (left * nodes) / 100_000;
   }
 
   boardAt(index: number): BoardState {
@@ -216,7 +227,9 @@ export class ReviewController {
         for (let i = 0; i < this.total; i++) {
           if (this.token !== token) return;
           const point = this.points[i];
-          const result = await engine.evaluate(new Uint8Array(this.boards[i]), point.player);
+          const result = await engine.search(new Uint8Array(this.boards[i]), point.player, {
+            ab: { ...FAST_PROFILE },
+          });
           if (this.token !== token) return;
           setPointValue(point, result.value, this.snapshot.humanColor, 'fast');
           this.done = i + 1;
