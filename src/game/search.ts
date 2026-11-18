@@ -477,6 +477,11 @@ function pickMove(top: readonly RootMove[], options: AbSearchOptions, random: ()
 
   const bestScore = top[0].score;
   const mateFloor = SCORE_WIN - MAX_PLY;
+  // 必败：最高分也是将杀败分。池内没有能赢的着法，噪声只会把「最能拖」
+  // 换成「送得快」——挡了还输也照样挡，把对手的成五推得最远才是败局里
+  // 唯一合理的抵抗，对手还可能犯错。
+  if (bestScore <= -mateFloor) return top[0].move;
+
   const pool = top.filter(
     (item) =>
       item.score >= bestScore - MOVE_MARGIN &&
